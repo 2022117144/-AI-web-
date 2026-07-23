@@ -17,8 +17,6 @@ if WANXIANG_2_SRC not in sys.path:
     sys.path.insert(0, WANXIANG_2_SRC)
 
 # ── 导入万象AI-2改 的配置模块 ──────────────────────────────────────────
-from 任务运行文件 import A0_config
-
 router = APIRouter(prefix="/api/image", tags=["image"])
 
 # ── PhotoGPT 默认地址 ──────────────────────────────────────────────────
@@ -42,6 +40,8 @@ class ImageGenerateResponse(BaseModel):
 
 def _get_photogpt_url() -> str:
     """从配置中读取 PhotoGPT 服务地址"""
+    # 延迟加载 A0_config
+    from 任务运行文件 import A0_config
     # 优先使用 接口地址，其次 other接口地址，最后默认值
     return (
         A0_config.config.get("接口地址")

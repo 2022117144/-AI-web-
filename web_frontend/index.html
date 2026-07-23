@@ -2,251 +2,529 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=1280">
 <title>万象AI V7.4.8</title>
 <style>
+:root{--bg:#1e1e1e;--bg2:#252526;--bg3:#2d2d30;--text:#e0e0e0;--text2:#999;--border:#454545}
 *{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft YaHei","PingFang SC",sans-serif}
-body{background:#1e1e1e;color:#e0e0e0;height:100vh;overflow:hidden;user-select:none}
+body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
 .app{display:flex;flex-direction:column;height:100vh}
-.title-bar{display:flex;align-items:center;height:30px;background:#2d2d30;padding:0 10px;flex-shrink:0}
+.title-bar{display:flex;align-items:center;height:30px;background:var(--bg3);padding:0 10px;flex-shrink:0}
 .title-bar .icon{width:20px;height:20px;background:#007acc;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;margin-right:6px}
-.title-bar .title{font-size:12px;color:#e0e0e0}.title-bar .title span{color:#ff6b6b;margin-left:6px;font-size:11px}
+.title-bar .title{font-size:12px;color:var(--text)}.title-bar .title span{color:#ff6b6b;margin-left:6px;font-size:11px}
 .title-bar .spacer{flex:1}
-.title-bar .win-btn{width:34px;height:26px;border:none;background:transparent;color:#999;cursor:pointer;font-size:12px}
-.title-bar .win-btn:hover{background:rgba(255,255,255,0.1)}
-.title-bar .win-btn.close:hover{background:#e74c3c;color:#fff}
-.main{display:flex;flex:1;overflow:hidden}
-.sidebar{width:180px;min-width:180px;background:#2d2d30;border-right:1px solid #454545;display:flex;flex-direction:column;padding:4px}
-.nav-btn{display:flex;align-items:center;gap:8px;padding:11px 12px;border:none;background:transparent;color:#999;font-size:12px;cursor:pointer;border-radius:6px;width:100%;margin:1px 0;font-weight:bold}
-.nav-btn:hover{background:#252526;color:#e0e0e0}
-.nav-btn.active{background:rgba(0,122,204,0.15);color:#007acc;border-left:3px solid #007acc}
-.nav-btn .icon{font-size:13px;width:18px;text-align:center}
-.nav-sep{flex:1}
-.nav-bottom{margin-top:auto;border-top:1px solid #454545;padding-top:4px}
-.nav-bottom .nav-btn{font-weight:normal;font-size:12px;padding:9px 12px;border:1px solid transparent;border-radius:6px;justify-content:center}
-.nav-bottom .nav-btn:hover{border-color:#007acc}
-.content{flex:1;display:flex;flex-direction:column;overflow:hidden;background:#1e1e1e}
-.toolbar{display:flex;align-items:center;padding:6px 12px;gap:4px;background:#252526;border-bottom:1px solid #454545;flex-wrap:wrap;min-height:36px}
-.toolbar .btn{padding:5px 12px;border:1px solid #454545;border-radius:4px;background:transparent;color:#e0e0e0;font-size:12px;cursor:pointer}
-.toolbar .btn:hover{background:rgba(0,122,204,0.1);border-color:#007acc}
-.toolbar .btn-primary{background:#007acc;border-color:#007acc;color:#fff}
-.toolbar .btn-primary:hover{background:#1f8ad2}
-.toolbar .btn-danger{color:#ff6b6b;border-color:#5a3a3a}
-.toolbar .btn-danger:hover{background:rgba(255,107,107,0.1)}
-.toolbar .right{flex:1;text-align:right;font-size:11px;color:#888}
-.pa{flex:1;overflow-y:auto;padding:16px}
-.pg{display:none}.pg.active{display:block}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,180px);gap:16px;justify-content:center}
-.card{width:180px;height:240px;background:#252526;border:1px solid #454545;border-radius:6px;cursor:pointer;overflow:hidden}
-.card:hover{border-color:#007acc}
-.card-new{display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px dashed #454545}
-.card-new:hover{border-color:#007acc}
-.card-new .plus{font-size:40px;color:#007acc;margin-bottom:6px}
-.card-new .label{font-size:13px;color:#999}
-.card .cover{width:100%;height:185px;background:#2d2d30;display:flex;align-items:center;justify-content:center;font-size:12px;color:#888}
-.card .name{padding:10px;font-size:13px;color:#e0e0e0;text-align:center}
-.pagination{display:flex;align-items:center;justify-content:center;gap:10px;padding:10px;font-size:12px;color:#888;margin-top:16px}
-.pagination .btn{padding:4px 10px;border:1px solid #454545;border-radius:4px;background:transparent;color:#888;cursor:pointer;font-size:12px}
-.pagination .btn:hover{color:#e0e0e0;border-color:#007acc}
-.cd{background:#252526;border:1px solid #454545;border-radius:6px;padding:14px;margin-bottom:12px}
-.cd-title{font-size:13px;font-weight:600;margin-bottom:10px;color:#e0e0e0}
-.cr{display:flex;gap:10px;margin-bottom:10px;align-items:center}
-.cr label{font-size:12px;color:#999;width:70px;flex-shrink:0}
-.cr input,.cr select,.cr textarea{flex:1;padding:6px 10px;border:1px solid #454545;border-radius:4px;background:#1e1e1e;color:#e0e0e0;font-size:12px;outline:none}
-.cr input:focus,.cr select:focus,.cr textarea:focus{border-color:#007acc}
-.cr textarea{min-height:70px;resize:vertical}
-.rb{background:#1e1e1e;border:1px solid #454545;border-radius:4px;padding:10px;margin-top:10px;font-size:12px;line-height:1.5;min-height:30px;white-space:pre-wrap}
-.rb img,.rb video{max-width:100%;border-radius:4px;margin-top:6px}
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.ld{display:inline-block;width:12px;height:12px;border:2px solid #454545;border-top-color:#007acc;border-radius:50%;animation:spin .6s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.cb{display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;padding:6px}
-.cm{padding:6px 10px;border-radius:6px;font-size:12px;line-height:1.4;max-width:85%}
-.cm.u{align-self:flex-end;background:#007acc;color:#fff}
-.cm.a{align-self:flex-start;background:#1e1e1e;border:1px solid #454545}
-.tb{display:flex;gap:2px;margin-bottom:12px;border-bottom:1px solid #454545;padding-bottom:6px}
-.tb-btn{padding:5px 14px;border:none;background:transparent;color:#999;cursor:pointer;font-size:12px;border-radius:4px 4px 0 0}
-.tb-btn:hover{color:#e0e0e0}
-.tb-btn.active{color:#007acc;background:rgba(0,122,204,0.1)}
+.title-bar .win-btn{width:34px;height:26px;border:none;background:transparent;color:var(--text2);cursor:pointer;font-size:12px}
+.wx-main{display:flex;flex:1;overflow:hidden}
+.wx-sidebar{width:180px;min-width:180px;background:var(--bg3);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:4px;overflow-y:auto;flex-shrink:0}
+.wx-nav-btn{display:flex;align-items:center;gap:6px;padding:10px 12px;border:none;background:transparent;color:var(--text2);font-size:12px;cursor:pointer;border-radius:6px;width:100%;margin:1px 0;font-weight:bold;flex-shrink:0}
+.wx-nav-btn:hover{background:var(--bg2);color:var(--text)}
+.wx-nav-btn.active{background:rgba(0,122,204,0.15);color:#007acc;border-left:3px solid #007acc}
+.wx-nav-btn .icon{font-size:13px;width:18px;text-align:center}
+.wx-nav-sep{flex:1;min-height:8px}
+.wx-nav-bottom{border-top:1px solid var(--border);padding-top:4px;margin-top:4px}
+.wx-nav-bottom .wx-nav-btn{font-weight:normal;font-size:12px;padding:8px 12px;border:1px solid transparent;border-radius:6px;justify-content:center}
+.wx-nav-bottom .wx-nav-btn:hover{border-color:#007acc}
+.wx-content{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+.wx-page{display:none;flex:1;min-height:0}
+.wx-page.active{display:flex;flex-direction:column}
+.wx-page.iframe-page{padding:0}
+.zc-iframe{flex:1;border:none;width:100%}
 .sp{display:none}.sp.active{display:block}
-.ic{text-align:center;padding:16px;background:#252526;border:1px solid #454545;border-radius:6px;cursor:pointer}
-.ic:hover{background:#2d2d30;border-color:#007acc}
-.ic .bi2{font-size:24px;margin-bottom:6px}
-.ic .nm{font-size:12px;color:#e0e0e0}
-.ic .de{font-size:11px;color:#999;margin-top:3px}
-.pr{height:4px;background:#1e1e1e;border-radius:2px;margin:6px 0;overflow:hidden}
-.pr div{height:100%;background:#007acc;border-radius:2px;width:0%}
-table{width:100%;border-collapse:collapse;font-size:12px}
-th,td{padding:6px 10px;text-align:left;border-bottom:1px solid #454545}
-th{color:#999;font-weight:500}
-.chk{display:flex;align-items:center;gap:6px;font-size:12px;color:#e0e0e0;cursor:pointer}
-.chk input{width:14px;height:14px;accent-color:#007acc;cursor:pointer}
+.tb{display:flex;gap:2px;border-bottom:1px solid var(--border);padding-bottom:6px;flex-shrink:0}
+.tb-btn{padding:5px 14px;border:none;background:transparent;color:var(--text2);cursor:pointer;font-size:12px;border-radius:4px 4px 0 0}
+.tb-btn:hover{color:var(--text)}
+.tb-btn.active{color:#007acc;background:rgba(0,122,204,0.1)}
 </style>
 </head>
 <body>
 <div class="app">
-<div class="title-bar"><div class="icon">🪄</div><div class="title">万象AI V7.4.8<span>免费用户</span></div><div class="spacer"></div><button class="win-btn">一</button><button class="win-btn">口</button><button class="win-btn close">✕</button></div>
-<div class="main">
-<div class="sidebar">
-<button class="nav-btn active" data-p="video"><span class="icon">🎬</span> 视频原创</button>
-<button class="nav-btn" data-p="clone"><span class="icon">⚡</span> 爆款克隆</button>
-<button class="nav-btn" data-p="transfer"><span class="icon">🎨</span> 视频转绘</button>
-<button class="nav-btn" data-p="novel"><span class="icon">📝</span> 小说创作</button>
-<button class="nav-btn" data-p="batch"><span class="icon">🤖</span> 批量挂机</button>
-<button class="nav-btn" data-p="tools"><span class="icon">🛠️</span> 创作工具</button>
-<button class="nav-btn" data-p="aitools"><span class="icon">📦</span> AI工具箱</button>
-<div class="nav-sep"></div>
-<div class="nav-bottom">
-<button class="nav-btn" data-p="copy"><span class="icon">📝</span> 文案</button>
-<button class="nav-btn" data-p="shots"><span class="icon">🎬</span> 分镜</button>
-<button class="nav-btn" data-p="pipeline"><span class="icon">⚙️</span> 流水线</button>
-<button class="nav-btn" onclick="open('/config.html','_self')"><span class="icon">⚙️</span> 软件设置</button>
-<button class="nav-btn"><span class="icon">🔄</span> 刷新额度</button>
-<button class="nav-btn"><span class="icon">🎨</span> 切换主题</button>
-<button class="nav-btn"><span class="icon">📋</span> 运行日志</button>
-</div></div>
-<div class="content">
-<div class="toolbar" id="toolbar">
-<button class="btn btn-primary">新建任务</button><button class="btn">加载任务</button><button class="btn">删除任务</button><button class="btn">一键成片</button><button class="btn">批量改写</button><button class="btn">设置分镜</button>
-<button class="btn">批量推理</button><button class="btn">批量语音</button><button class="btn">批量绘图</button><button class="btn">批量放大</button><button class="btn">视频推理</button><button class="btn">批量视频</button>
-<button class="btn">批量对口型</button><button class="btn">合成视频</button><button class="btn btn-danger">销毁镜像</button><button class="btn btn-danger">云端部署</button><button class="btn btn-danger">打开文件</button><button class="btn btn-danger">停止运行</button>
-<div class="right">第 1 / 1 页</div></div>
-<div class="pa" id="pa">
-<!-- 视频原创 / 爆款克隆 / 视频转绘 / 小说创作 - 项目卡片 -->
-<div class="pg active" id="p-video">
-<div class="grid">
-<div class="card card-new"><div class="plus">+</div><div class="label">新建项目</div></div>
-<div class="card"><div class="cover">图片封面</div><div class="name">2</div></div>
-<div class="card"><div class="cover">图片封面</div><div class="name">1</div></div>
-<div class="card"><div class="cover">图片封面</div><div class="name">9</div></div>
-<div class="card"><div class="cover">图片封面</div><div class="name">3</div></div>
+  <div class="title-bar">
+    <div class="icon">🪄</div><div class="title">万象AI V7.4.8<span>免费用户</span></div>
+    <div class="spacer"></div>
+    <button class="win-btn">一</button><button class="win-btn">口</button><button class="win-btn close">✕</button>
+  </div>
+  <div class="wx-main">
+    <div class="wx-sidebar">
+      <button class="wx-nav-btn active" data-wx="novel"><span class="icon">📝</span> 小说创作</button>
+      <button class="wx-nav-btn" data-wx="batch"><span class="icon">🤖</span> 批量挂机</button>
+      <button class="wx-nav-btn" data-wx="tools"><span class="icon">🛠️</span> 创作工具</button>
+      <button class="wx-nav-btn" data-wx="copy"><span class="icon">📝</span> 文案</button>
+      <button class="wx-nav-btn" data-wx="shots"><span class="icon">🎬</span> 分镜</button>
+      <button class="wx-nav-btn" data-wx="pipeline"><span class="icon">⚙️</span> 流水线</button>
+      <button class="wx-nav-btn" data-wx="aitools"><span class="icon">📦</span> AI工具箱</button>
+      <div class="wx-nav-sep"></div>
+      <div class="wx-nav-bottom">
+        <button class="wx-nav-btn" data-wx="settings"><span class="icon">⚙️</span> 设置</button>
+        <button class="wx-nav-btn" data-wx="theme"><span class="icon">🎨</span> 切换主题</button>
+        <button class="wx-nav-btn" data-wx="logs"><span class="icon">📋</span> 运行日志</button>
+      </div>
+    </div>
+    <div class="wx-content">
+      <!-- 小说创作 -->
+      <div class="wx-page active" id="wx-novel">
+        <div style="padding:16px;flex:1;display:flex;flex-direction:column;min-height:0">
+          <div class="tb"><button class="tb-btn active" onclick="switchNovelTab('outline')">📋 大纲</button><button class="tb-btn" onclick="switchNovelTab('volumes')">📚 卷</button><button class="tb-btn" onclick="switchNovelTab('content')">📝 正文</button></div>
+          <div style="flex:1;display:flex;min-height:0;margin-top:8px;gap:12px">
+            <div style="width:200px;min-width:200px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px;overflow-y:auto;flex-shrink:0">
+              <div style="font-size:12px;color:var(--text2);margin-bottom:6px">📁 项目</div>
+              <div id="novelProjects" style="font-size:12px;color:var(--text2)">暂无项目</div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;min-height:0">
+              <div class="sp active" id="novel-outline">
+                <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+                  <input id="novelTopic" placeholder="输入小说主题或设定..." style="flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px">
+                  <button class="wx-btn" onclick="genOutline()" style="background:#007acc;color:#fff;border-color:#007acc;padding:6px 14px">生成大纲</button>
+                  <button class="wx-btn" onclick="genChapterOutline()" style="padding:6px 14px">生成章纲</button>
+                  <button class="wx-btn" onclick="genChapterContent()" style="padding:6px 14px">生成正文</button>
+                </div>
+                <textarea id="novelOutline" style="width:100%;flex:1;min-height:200px;padding:10px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;resize:vertical" placeholder="AI生成的大纲将显示在这里..."></textarea>
+              </div>
+              <div class="sp" id="novel-volumes" style="font-size:12px;color:var(--text2);padding:20px;text-align:center">卷列表功能开发中</div>
+              <div class="sp" id="novel-content" style="font-size:12px;color:var(--text2);padding:20px;text-align:center">正文编辑功能开发中</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- 批量挂机 -->
+      <div class="wx-page" id="wx-batch">
+        <div style="padding:12px 16px;flex:1;display:flex;flex-direction:column;min-height:0">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-shrink:0">
+            <span style="font-size:14px;color:var(--text);font-weight:600">📂 项目</span>
+            <button class="wx-btn" onclick="newProject()" style="background:#007acc;color:#fff;border:none;padding:5px 12px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">＋ 新建项目</button>
+            <label class="wx-btn" style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:5px 10px;font-size:12px;margin-left:4px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()" style="accent-color:#007acc;width:13px;height:13px;cursor:pointer"> 全选</label>
+            <button class="wx-btn" onclick="batchDelete()" style="color:#e74c3c;border-color:var(--border);padding:5px 12px;font-size:12px;white-space:nowrap">批量删除</button>
+          </div>
+          <div id="batchProjectList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:1px">
+            <div style="text-align:center;padding:40px;color:var(--text2);font-size:13px">暂无项目，点击「新建项目」创建</div>
+          </div>
+        </div>
+      </div>
+      <!-- 创作工具 -->
+      <div class="wx-page" id="wx-tools">
+        <div style="padding:16px;flex:1;display:flex;flex-direction:column;min-height:0">
+          <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:12px">🛠️ 创作工具</div>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+            <button class="wx-btn" onclick="setToolMode('general')" style="background:#f39c12;border-color:#f39c12;color:#fff;padding:6px 16px;font-weight:bold">通用推理模式</button>
+            <button class="wx-btn" onclick="setToolMode('director')" style="background:#e74c3c;border-color:#e74c3c;color:#fff;padding:6px 16px;font-weight:bold">开启导演模式</button>
+            <select id="toolScript" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;height:32px"><option>预设指令</option><option>无预设指令</option></select>
+            <input id="toolVideoUrl" placeholder="输入网络视频地址,支持国内外各大主流平台" style="flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;height:32px">
+            <button class="wx-btn" onclick="toolAction('downloadVideo')" style="padding:6px 12px;height:32px;background:#007acc;color:#fff;border-color:#007acc">下载网络视频</button>
+            <button class="wx-btn" onclick="toolAction('openFolder')" style="padding:6px 12px;height:32px">打开辅助文件夹</button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input id="toolAudioFile" placeholder="选择需要提取字幕的音频或视频, 最长支持30分钟" style="flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;height:32px">
+            <button class="wx-btn" onclick="toolAction('selectAudio')" style="padding:6px 12px;height:32px">选择音频文件</button>
+            <button class="wx-btn" onclick="toolAction('extractSubtitle')" style="padding:6px 12px;height:32px;background:#007acc;color:#fff;border-color:#007acc">提取音频字幕</button>
+          </div>
+          <div id="toolOutput" style="flex:1;margin-top:10px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:12px;color:var(--text2);overflow-y:auto;min-height:100px">操作结果将显示在这里</div>
+        </div>
+      </div>
+      <!-- 文案/分镜/流水线/AI工具箱 - iframe -->
+            <div class="wx-page iframe-page" id="wx-copy">
+              <div class="proj-select-bar"><span class="ps-label">📁 项目</span><select class="ps-select" id="psCopy" onchange="onPsChange('copy',this.value)"><option value="">— 选择项目 —</option></select></div>
+              <iframe class="zc-iframe" src="/zc/?tab=script&v=2"></iframe>
+            </div>
+            <div class="wx-page iframe-page" id="wx-shots">
+              <div class="proj-select-bar"><span class="ps-label">📁 项目</span><select class="ps-select" id="psShots" onchange="onPsChange('shots',this.value)"><option value="">— 选择项目 —</option></select></div>
+              <iframe class="zc-iframe" src="/zc/?tab=shots&v=2"></iframe>
+            </div>
+            <div class="wx-page iframe-page" id="wx-pipeline">
+              <div class="proj-select-bar"><span class="ps-label">📁 项目</span><select class="ps-select" id="psPipeline" onchange="onPsChange('pipeline',this.value)"><option value="">— 选择项目 —</option></select></div>
+              <iframe class="zc-iframe" src="/zc/?tab=pipeline&v=2"></iframe>
+            </div>
+            <div class="wx-page iframe-page" id="wx-aitools"><iframe class="zc-iframe" src="/zc/?tab=settings&v=2"></iframe></div>
+      <!-- 设置 -->
+      <div class="wx-page iframe-page" id="wx-settings"><iframe class="zc-iframe" src="/zc/?tab=settings&v=2"></iframe></div>
+      <!-- 切换主题 -->
+      <div class="wx-page" id="wx-theme">
+        <div style="padding:20px;display:flex;flex-direction:column;gap:16px;max-width:500px">
+          <div style="font-size:16px;font-weight:600;color:var(--text)">🎨 切换主题</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="theme-card" onclick="setTheme('dark')" style="background:var(--bg);border:2px solid #007acc;border-radius:8px;padding:20px;text-align:center;cursor:pointer">
+              <div style="font-size:32px;margin-bottom:8px">🌙</div>
+              <div style="font-size:13px;color:var(--text);font-weight:600">深色主题</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:4px">当前使用中</div>
+            </div>
+            <div class="theme-card" onclick="setTheme('light')" style="background:#f5f5f5;border:2px solid transparent;border-radius:8px;padding:20px;text-align:center;cursor:pointer">
+              <div style="font-size:32px;margin-bottom:8px">☀️</div>
+              <div style="font-size:13px;color:#333;font-weight:600">浅色主题</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:4px">点击切换</div>
+            </div>
+          </div>
+          <div id="themeStatus" style="font-size:12px;color:var(--text2)"></div>
+        </div>
+      </div>
+      <!-- 运行日志 -->
+      <div class="wx-page" id="wx-logs">
+        <div style="padding:20px;flex:1;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-shrink:0">
+            <span style="font-size:16px;font-weight:600;color:var(--text)">📋 运行日志</span>
+            <button class="wx-btn" onclick="clearLogs()" style="color:#e74c3c;border-color:var(--border);padding:4px 12px;font-size:12px">清空日志</button>
+            <button class="wx-btn" onclick="refreshLogs()" style="padding:4px 12px;font-size:12px">🔄 刷新</button>
+          </div>
+          <div id="logContent" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:12px;font-family:monospace;font-size:11px;color:var(--text);overflow-y:auto;white-space:pre-wrap;line-height:1.5">
+            <div style="color:var(--text2);text-align:center;padding:40px">加载日志中...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
-<div class="pagination"><button class="btn">上一页</button><span>第 1 / 1 页</span><button class="btn">下一页</button></div>
-</div>
-<div class="pg" id="p-clone"><div class="grid"><div class="card card-new"><div class="plus">+</div><div class="label">新建项目</div></div><div class="card"><div class="cover">图片封面</div><div class="name">1</div></div><div class="card"><div class="cover">图片封面</div><div class="name">8</div></div></div><div class="pagination"><button class="btn">上一页</button><span>第 1 / 1 页</span><button class="btn">下一页</button></div></div>
-<div class="pg" id="p-transfer"><div class="grid"><div class="card card-new"><div class="plus">+</div><div class="label">新建项目</div></div><div class="card"><div class="cover">图片封面</div><div class="name">3</div></div></div><div class="pagination"><button class="btn">上一页</button><span>第 1 / 1 页</span><button class="btn">下一页</button></div></div>
-<div class="pg" id="p-novel"><div class="grid"><div class="card card-new"><div class="plus">+</div><div class="label">新建项目</div></div></div><div class="pagination"><button class="btn">上一页</button><span>第 1 / 1 页</span><button class="btn">下一页</button></div></div>
-<!-- 批量挂机 -->
-<div class="pg" id="p-batch">
-<div class="cd"><div class="cd-title">批量挂机任务, 云端引擎以及视频模型以顶部设置为准</div>
-<div class="cr"><label>任务数量</label><input type="number" value="1" style="width:100px">
-<button class="btn btn-primary">添加计划</button><button class="btn">删除计划</button></div>
-<div class="cr" style="flex-wrap:wrap;gap:12px">
-<label class="chk"><input type="checkbox"> 批量推理</label>
-<label class="chk"><input type="checkbox"> 批量绘图</label>
-<label class="chk"><input type="checkbox"> 批量配音</label>
-<label class="chk"><input type="checkbox"> 视频推理</label>
-<label class="chk"><input type="checkbox"> 批量视频</label>
-<label class="chk"><input type="checkbox"> 剪映导出</label>
-</div>
-<div class="cr"><button class="btn btn-primary">开始任务</button><button class="btn btn-danger">停止任务</button></div>
-<table><thead><tr><th>任务编号</th><th>选择任务</th><th>选择模型</th><th>选择VAE</th><th>采样方法</th><th>调度器</th><th>引导系数</th><th>采样步数</th><th>重绘幅度</th><th>运行状态</th></tr></thead>
-<tbody><tr><td colspan="10" style="text-align:center;color:#999">暂无计划任务</td></tr></tbody></table>
-</div></div>
-<!-- 创作工具 -->
-<div class="pg" id="p-tools">
-<div class="cd"><div class="cd-title">🛠️ 创作工具</div>
-<div class="cr"><label>视频链接</label><input placeholder="输入视频链接..."><button class="btn">下载</button></div>
-<div class="cr"><label>提取文件</label><input placeholder="选择文件..."><button class="btn">选择文件</button><button class="btn btn-primary">提取字幕</button></div>
-<div class="cr"><label>模式</label><select><option>通用推理模式</option><option>极速模式</option><option>高质量模式</option></select></div>
-<div class="cr"><button class="btn">视频下载</button><button class="btn">字幕提取</button><button class="btn">音频提取</button><button class="btn">视频拆帧</button><button class="btn">图片合成</button></div>
-</div></div>
-<!-- AI工具箱 -->
-<div class="pg" id="p-aitools">
-<div class="cd" style="font-size:18px;font-weight:bold;margin-bottom:12px;color:#e0e0e0">AI 工具箱</div>
-<div class="g2">
-<div class="ic" onclick="alert('AI数字人功能')"><div class="bi2">🧑</div><div class="nm">AI数字人</div><div class="de">上传视频和文案，AI自动生成数字人视频</div></div>
-<div class="ic" onclick="alert('VD错峰视频管理')"><div class="bi2">📊</div><div class="nm">VD错峰视频管理</div><div class="de">VD错峰任务运行数据, 异步查询同步至项目文件</div></div>
-<div class="ic" onclick="alert('更多工具开发中')"><div class="bi2">🔧</div><div class="nm">更多工具开发中</div><div class="de">更多AI实用功能正在开发中</div></div>
-</div></div>
-<!-- 文案 - 智创工具 -->
-<div class="pg" id="p-copy">
-<div class="cd"><div class="cd-title" style="font-size:18px;font-weight:bold">📜 文案生成</div>
-<div class="cr"><label>视频主题</label><input id="copyTopic" placeholder="输入视频主题，例如：人工智能的未来发展" style="flex:1">
-<select id="copyTone" style="width:120px"><option>叙事</option><option>温暖</option><option>幽默</option><option>科普</option><option>悬疑</option></select>
-<button class="btn btn-primary" onclick="genCopy()">✨ AI生成</button></div>
-<div class="cd-title" style="font-size:13px;margin-top:12px">文案内容</div>
-<textarea id="copyEditor" style="width:100%;min-height:180px;padding:10px;border:1px solid #454545;border-radius:4px;background:#1e1e1e;color:#e0e0e0;font-size:13px;resize:vertical" placeholder="AI生成的文案将显示在这里，你也可以直接编辑..."></textarea>
-<div class="cr" style="margin-top:10px">
-<input id="copyModify" placeholder="输入修改要求，例如：缩短到200字" style="flex:1">
-<button class="btn" onclick="alert('AI修改待接入')">✏️ AI修改</button>
-<button class="btn" onclick="alert('保存文案待接入')">💾 保存文案</button>
-<button class="btn btn-primary" onclick="alert('生成分镜待接入')">🎬 生成分镜</button>
-</div>
-<div id="copyStatus" style="font-size:12px;color:#999;margin-top:6px"></div>
-</div></div>
-<!-- 分镜 - 智创工具 -->
-<div class="pg" id="p-shots">
-<div class="cd"><div class="cd-title" style="font-size:18px;font-weight:bold">🎬 分镜管理</div>
-<div class="cr">
-<label>宫格</label><select style="width:100px"><option>1宫格</option><option selected>4宫格</option><option>9宫格</option><option>16宫格</option></select>
-<button class="btn" onclick="alert('生成首帧待接入')">🖼️ 生成首帧</button>
-<button class="btn" onclick="alert('生成尾帧待接入')">🖼️ 生成尾帧</button>
-<button class="btn" onclick="alert('生成视频待接入')">🎥 生成视频</button>
-<button class="btn btn-primary" onclick="alert('生成全部待接入')">⚡ 生成全部</button>
-</div>
-<div class="g2">
-<div><div class="cd-title" style="font-size:13px">分镜列表</div>
-<div style="background:#1e1e1e;border:1px solid #454545;border-radius:4px;padding:10px;min-height:200px;font-size:12px;color:#999">暂无分镜，请先在文案页生成</div>
-<div class="cd-title" style="font-size:13px;margin-top:12px">SRT 字幕</div>
-<textarea style="width:100%;min-height:60px;padding:8px;border:1px solid #454545;border-radius:4px;background:#1e1e1e;color:#e0e0e0;font-size:12px" readonly placeholder="AI分析文案后将自动生成SRT字幕..."></textarea>
-</div>
-<div><div class="cd-title" style="font-size:13px">分镜详情</div>
-<div style="background:#1e1e1e;border:1px solid #454545;border-radius:4px;padding:10px;min-height:200px">
-<div style="font-size:12px;color:#999;margin-bottom:8px">选择分镜查看详情</div>
-<div style="font-size:12px;color:#e0e0e0;margin-bottom:8px" id="shotScene"></div>
-<textarea placeholder="画面提示词" style="width:100%;min-height:60px;padding:6px;border:1px solid #454545;border-radius:4px;background:#1e1e1e;color:#e0e0e0;font-size:12px"></textarea>
-<div class="g2" style="margin-top:8px">
-<div style="border:1px dashed #555;border-radius:4px;height:100px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#666">首帧</div>
-<div style="border:1px dashed #555;border-radius:4px;height:100px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#666">尾帧</div>
-</div></div></div></div>
-</div></div>
-<!-- 流水线 - 智创工具 -->
-<div class="pg" id="p-pipeline">
-<div class="cd"><div class="cd-title" style="font-size:18px;font-weight:bold">🔧 创作流水线</div>
-<div style="font-size:12px;color:#999;margin-bottom:16px">一键执行完整创作流程：风格提示词 → 文案 → 分镜 → 图片 → 视频 → 合成 → 输出</div>
-<div id="pipelineSteps">
-<div class="cr" style="padding:8px 12px;background:#1e1e1e;border:1px solid #454545;border-radius:4px;margin-bottom:6px"><span style="font-size:16px;width:30px">🎨</span><div style="flex:1"><div style="font-size:13px;color:#e0e0e0">Step 1: 风格提示词</div><div style="font-size:11px;color:#999">选择视觉风格预设</div></div><span style="font-size:12px;color:#666">⏳ 待执行</span></div>
-<div class="cr" style="padding:8px 12px;background:#1e1e1e;border:1px solid #454545;border-radius:4px;margin-bottom:6px"><span style="font-size:16px;width:30px">📝</span><div style="flex:1"><div style="font-size:13px;color:#e0e0e0">Step 2: 文案生成</div><div style="font-size:11px;color:#999">AI生成文案脚本</div></div><span style="font-size:12px;color:#666">⏳ 待执行</span></div>
-<div class="cr" style="padding:8px 12px;background:#1e1e1e;border:1px solid #454545;border-radius:4px;margin-bottom:6px"><span style="font-size:16px;width:30px">🎬</span><div style="flex:1"><div style="font-size:13px;color:#e0e0e0">Step 3: 分镜分析</div><div style="font-size:11px;color:#999">生成分镜列表+字幕</div></div><span style="font-size:12px;color:#666">⏳ 待执行</span></div>
-<div class="cr" style="padding:8px 12px;background:#1e1e1e;border:1px solid #454545;border-radius:4px;margin-bottom:6px"><span style="font-size:16px;width:30px">🖼️</span><div style="flex:1"><div style="font-size:13px;color:#e0e0e0">Step 4: 图片生成</div><div style="font-size:11px;color:#999">为每个分镜生成图片</div></div><span style="font-size:12px;color:#666">⏳ 待执行</span></div>
-<div class="cr" style="padding:8px 12px;background:#1e1e1e;border:1px solid #454545;border-radius:4px;margin-bottom:6px"><span style="font-size:16px;width:30px">🎥</span><div style="flex:1"><div style="font-size:13px;color:#e0e0e0">Step 5: 视频生成</div><div style="font-size:11px;color:#999">为每个分镜生成视频</div></div><span style="font-size:12px;color:#666">⏳ 待执行</span></div>
-<div class="cr" style="padding:8px 12px;background:#1e1e1e;border:1px solid #454545;border-radius:4px;margin-bottom:6px"><span style="font-size:16px;width:30px">✂️</span><div style="flex:1"><div style="font-size:13px;color:#e0e0e0">Step 6: 视频合成</div><div style="font-size:11px;color:#999">拼接所有视频片段</div></div><span style="font-size:12px;color:#666">⏳ 待执行</span></div>
-<div class="cr" style="padding:8px 12px;background:#1e1e1e;border:1px solid #454545;border-radius:4px"><span style="font-size:16px;width:30px">🎵</span><div style="flex:1"><div style="font-size:13px;color:#e0e0e0">Step 7: 加BGM导出</div><div style="font-size:11px;color:#999">添加背景音乐并输出</div></div><span style="font-size:12px;color:#666">⏳ 待执行</span></div>
-</div>
-<div class="cr" style="margin-top:12px"><button class="btn btn-primary" onclick="alert('执行流水线待接入')">▶ 执行流水线</button><button class="btn btn-danger" onclick="alert('停止待接入')">⏹ 停止</button><button class="btn" onclick="alert('刷新状态待接入')">🔄 刷新状态</button></div>
-</div>
-<!-- 会员升级 -->
-<div class="pg" id="p-vip">
-<div class="g2">
-<div class="cd" style="text-align:center"><div class="cd-title">免费版</div><div style="font-size:24px;margin:10px 0">¥0</div><div style="font-size:12px;color:#999;line-height:2">每日10次GPT<br>每日5张图片<br>基础视频生成</div><button class="btn" style="border:1px solid #454545;margin-top:10px;width:100%">当前使用</button></div>
-<div class="cd" style="text-align:center;border-color:#007acc"><div class="cd-title" style="color:#007acc">专业版</div><div style="font-size:24px;margin:10px 0">¥99<small style="font-size:12px;color:#999">/月</small></div><div style="font-size:12px;color:#999;line-height:2">无限GPT<br>无限图片<br>优先视频<br>批量处理</div><button class="btn btn-primary" style="margin-top:10px;width:100%">升级</button></div>
-</div></div>
-</div></div></div>
+
 <script>
-document.querySelectorAll('.nav-btn[data-p]').forEach(b=>{
+// ====== 导航切换 ======
+document.querySelectorAll('.wx-nav-btn[data-wx]').forEach(function(b){
 b.addEventListener('click',function(){
-document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'));
+document.querySelectorAll('.wx-nav-btn').forEach(function(x){x.classList.remove('active')});
 this.classList.add('active');
-document.querySelectorAll('.pg').forEach(x=>x.classList.remove('active'));
-const t=document.getElementById('p-'+this.dataset.p);
+document.querySelectorAll('.wx-page').forEach(function(x){x.classList.remove('active')});
+var t=document.getElementById('wx-'+this.dataset.wx);
 if(t)t.classList.add('active');
-const hideToolbar=['aitools','copy','shots','pipeline'];
-document.getElementById('toolbar').style.display=hideToolbar.includes(this.dataset.p)?'none':'flex';
+if (this.dataset.wx === 'batch') loadProjects();
+if (this.dataset.wx === 'logs') refreshLogs();
+saveCurrentPage();
 })});
-// 文案生成
-async function genCopy(){
-const topic=document.getElementById('copyTopic').value.trim(),tone=document.getElementById('copyTone').value,st=document.getElementById('copyStatus'),ed=document.getElementById('copyEditor');
-if(!topic){st.innerHTML='请先输入视频主题';return;}
-st.innerHTML='<span class="ld"></span> AI正在生成文案...';
-try{
-const toneMap={'叙事':'自然流畅的旁白','温暖':'温暖感人的语调','幽默':'轻松幽默的风格','科普':'通俗易懂的科普','悬疑':'悬疑紧张的氛围'};
-const r=await fetch('/api/llm/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:'主题：'+topic+'\n请生成一段短视频文案。',model:'gpt-4o'})});
-const d=await r.json();
-if(d.reply){ed.value=d.reply;st.innerHTML='✅ 文案生成完成';}
-else st.innerHTML='❌ 生成失败，请检查LLM配置';
-}catch(e){st.innerHTML='❌ 请求失败: '+e.message;}
+restoreLastPage();
+
+// ====== 页面持久化 ======
+function saveCurrentPage() {
+  var a = document.querySelector('.wx-nav-btn.active');
+  if (a) localStorage.setItem('wx_last_page', a.dataset.wx);
 }
+// 恢复上次页面
+function restoreLastPage() {
+  // 恢复主题
+  var savedTheme = localStorage.getItem('wx_theme');
+  if (savedTheme === 'light') {
+    document.documentElement.style.setProperty('--bg', '#f0ebe3');
+    document.documentElement.style.setProperty('--bg2', '#faf6f0');
+    document.documentElement.style.setProperty('--bg3', '#e8e2d8');
+    document.documentElement.style.setProperty('--text', '#3d3d3d');
+    document.documentElement.style.setProperty('--text2', '#888888');
+    document.documentElement.style.setProperty('--border', '#d5cfc5');
+    // 更新主题卡片样式和状态文字
+    var cards = document.querySelectorAll('.theme-card');
+    if (cards.length > 0) {
+      cards.forEach(function(c){c.style.borderColor='transparent'});
+      cards[1].style.borderColor='#007acc';
+      var labels = document.querySelectorAll('.theme-card div:last-child');
+      if (labels.length >= 2) {
+        labels[0].textContent = '点击切换';
+        labels[1].textContent = '当前使用中';
+      }
+    }
+  }
+  // 恢复上次页面
+  var s = localStorage.getItem('wx_last_page');
+  if (s) { var b = document.querySelector('[data-wx="'+s+'"]'); if (b) b.click(); }
+}
+
+// ====== 小说创作 ======
+function switchNovelTab(tab) {
+  document.querySelectorAll('.tb-btn').forEach(function(b){b.classList.remove('active')});
+  document.querySelectorAll('.tb-btn').forEach(function(b){if(b.textContent.includes({outline:'大纲',volumes:'卷',content:'正文'}[tab]))b.classList.add('active')});
+  document.querySelectorAll('#wx-novel .sp').forEach(function(p){p.classList.remove('active')});
+  var t = document.getElementById('novel-'+tab);
+  if (t) t.classList.add('active');
+}
+async function genOutline() {
+  var t = document.getElementById('novelTopic').value.trim();
+  var o = document.getElementById('novelOutline');
+  if (!t) { o.value = '请输入小说主题'; return; }
+  o.value = 'AI正在生成大纲...';
+  try {
+    var r = await fetch('/api/llm/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:'请为以下主题生成小说大纲：\n'+t})});
+    var d = await r.json();
+    o.value = d.reply || '生成失败';
+  } catch(e) { o.value = '请求失败: '+e.message; }
+}
+async function genChapterOutline() {
+  var o = document.getElementById('novelOutline');
+  o.value = '章纲生成功能待接入';
+}
+async function genChapterContent() {
+  var o = document.getElementById('novelOutline');
+  o.value = '正文生成功能待接入';
+}
+
+// ====== 创作工具 ======
+function setToolMode(mode) {
+  var btns = document.querySelectorAll('#wx-tools .wx-btn');
+  btns.forEach(function(b){
+    if (b.textContent.includes('通用推理')) b.style.background = mode==='general' ? '#f39c12' : '#454545';
+    if (b.textContent.includes('开启导演')) b.style.background = mode==='director' ? '#e74c3c' : '#454545';
+  });
+  document.getElementById('toolOutput').textContent = '已切换到' + (mode==='general'?'通用推理模式':'导演模式');
+}
+function toolAction(action) {
+  var msgs = {downloadVideo:'正在下载视频...', openFolder:'正在打开辅助文件夹...', selectAudio:'已选择音频文件', extractSubtitle:'正在提取字幕...'};
+  document.getElementById('toolOutput').textContent = msgs[action] || '执行中...';
+}
+
+// ====== 切换主题 ======
+function setTheme(theme) {
+  var cards = document.querySelectorAll('.theme-card');
+  cards.forEach(function(c){c.style.borderColor='transparent'});
+  localStorage.setItem('wx_theme', theme);
+  // 更新状态文字
+  var labels = document.querySelectorAll('.theme-card div:last-child');
+  if (labels.length >= 2) {
+    labels[0].textContent = theme === 'dark' ? '当前使用中' : '点击切换';
+    labels[1].textContent = theme === 'light' ? '当前使用中' : '点击切换';
+  }
+  if (theme === 'dark') {
+    cards[0].style.borderColor='#007acc';
+    document.documentElement.style.setProperty('--bg', '#1e1e1e');
+    document.documentElement.style.setProperty('--bg2', '#252526');
+    document.documentElement.style.setProperty('--bg3', '#2d2d30');
+    document.documentElement.style.setProperty('--text', '#e0e0e0');
+    document.documentElement.style.setProperty('--text2', '#999');
+    document.documentElement.style.setProperty('--border', '#454545');
+    document.getElementById('themeStatus').textContent = '已切换到深色主题';
+  } else {
+    cards[1].style.borderColor='#007acc';
+    document.documentElement.style.setProperty('--bg', '#f0ebe3');
+    document.documentElement.style.setProperty('--bg2', '#faf6f0');
+    document.documentElement.style.setProperty('--bg3', '#e8e2d8');
+    document.documentElement.style.setProperty('--text', '#3d3d3d');
+    document.documentElement.style.setProperty('--text2', '#888888');
+    document.documentElement.style.setProperty('--border', '#d5cfc5');
+    document.getElementById('themeStatus').textContent = '已切换到浅色主题';
+  }
+  // 刷新所有 iframe 以继承主题
+  document.querySelectorAll('iframe').forEach(function(f){
+    f.src = f.src.replace(/&v=\d+/, '') + '&v=' + Date.now();
+  });
+  applyTheme();
+}
+function applyTheme() {
+  var t = localStorage.getItem('wx_theme') || 'dark';
+  var isDark = t === 'dark';
+  document.body.style.background = isDark ? '#1e1e1e' : '#f5f5f5';
+  var els = document.querySelectorAll('.wx-sidebar, .wx-content, .title-bar, .proj-bar, .run-mini, .cd, .wx-btn');
+  els.forEach(function(el){ /* theme applied via CSS variables */ });
+}
+
+// ====== 运行日志 ======
+async function refreshLogs() {
+  var el = document.getElementById('logContent');
+  el.innerHTML = '<div style="color:var(--text2);text-align:center;padding:20px">正在加载日志...</div>';
+  try {
+    var r = await fetch('/api/pipeline/runs');
+    var data = await r.json();
+    if (Array.isArray(data) && data.length > 0) {
+      el.innerHTML = data.map(function(log){
+        var t = log.created_time || log.timestamp || '';
+        var s = log.status || 'unknown';
+        var id = (log.run_id || log.id || '').substring(0, 12);
+        return '['+t+'] ['+s+'] run_'+id+'...';
+      }).join('\n');
+    } else {
+      el.innerHTML = '暂无运行日志记录';
+    }
+  } catch(e) {
+    el.innerHTML = '暂无运行日志记录';
+  }
+}
+function clearLogs() {
+  // 只清空前端显示，刷新时重新从后端获取
+  document.getElementById('logContent').innerHTML = '<div style="color:var(--text2);text-align:center;padding:20px">日志已清空（刷新后重新加载）</div>';
+}
+
+// ====== 批量挂机 ======
+const STEP_LABELS = ['🎨风格','📝文案','🎬SRT+分镜','🖼️图片','🎥视频','✂️合成','🎵导出'];
+const API_BASE = 'http://localhost:8765';
+
+async function loadProjects() {
+  var el = document.getElementById('batchProjectList');
+  try {
+    var r = await fetch(API_BASE + '/api/projects');
+    var data = await r.json();
+    var projs = Object.values(data);
+    if (!projs.length) { el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2);font-size:13px">暂无项目，点击「新建项目」创建</div>'; return; }
+    var rr = await fetch(API_BASE + '/api/pipeline/runs');
+    var allRuns = await rr.json();
+    var runsByProj = {};
+    (Array.isArray(allRuns) ? allRuns : []).forEach(function(run){ var pid = run.project_id || ''; if (!runsByProj[pid]) runsByProj[pid] = []; runsByProj[pid].push(run); });
+    el.innerHTML = projs.map(function(p){
+      var runs = runsByProj[p.project_id] || [];
+      var latest = runs.length > 0 ? runs[0] : null;
+      var runsHtml = latest ? (function(r){
+        var st = r.status || 'unknown';
+        var icon = st === 'completed' ? '✅' : st === 'error' ? '❌' : st === 'cancelled' ? '⏹' : '⏳';
+        var color = st === 'completed' ? '#2ecc71' : st === 'error' ? '#e74c3c' : st === 'cancelled' ? '#f39c12' : '#666';
+        var steps = r.steps || [];
+        var dots = steps.map(function(s,i){
+                  var cls = s.status === 'completed' ? 'done' : s.status === 'error' ? 'fail' : s.status === 'running' ? 'running' : 'skip';
+                  return '<div class="step-dot '+cls+'" title="'+STEP_LABELS[i]+': '+(s.status||'待执行')+'">'+(i+1)+'</div>';
+                }).join('');
+        var idShort = (r.run_id || r.id || '').substring(0, 8);
+        return '<div class="run-mini"><span class="run-mini-status" style="color:'+color+'">'+icon+' '+st+'</span><span class="run-mini-id">'+idShort+'…</span><div style="display:flex;gap:2px">'+dots+'</div></div>';
+      })(latest) : '<span style="font-size:11px;color:var(--text2)">暂无运行记录</span>';
+      return '<div class="proj-bar"><input type="checkbox" class="proj-cb" value="'+p.project_id+'" style="accent-color:#007acc;width:14px;height:14px;cursor:pointer;flex-shrink:0"><span class="proj-name" onclick="showRenameModal(\''+p.project_id+'\',\''+(p.project_name||'未命名').replace(/'/g,'')+'\')" title="点击重命名" style="cursor:pointer">📁 '+(p.project_name||'未命名')+'</span><div class="proj-runs">'+runsHtml+'</div><button class="wx-btn" onclick="event.stopPropagation();deleteProject(\''+p.project_id+'\',\''+(p.project_name||'未命名').replace(/'/g,'')+'\')" style="color:var(--text);border-color:var(--border);padding:2px 8px;font-size:13px;flex-shrink:0;border-radius:3px;line-height:1" title="删除">🗑</button></div>';
+    }).join('');
+  } catch(e) { el.innerHTML = '<div style="text-align:center;padding:20px;color:#e74c3c">加载失败: '+e.message+'</div>'; }
+}
+
+async function newProject() {
+  try {
+    await fetch(API_BASE + '/api/projects', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_name:'未命名'})});
+    loadProjects();
+  } catch(e) { alert('创建失败: '+e.message); }
+}
+
+function toggleSelectAll() {
+  var checked = document.getElementById('selectAll').checked;
+  document.querySelectorAll('.proj-cb').forEach(function(cb){cb.checked = checked;});
+}
+
+async function batchDelete() {
+  var cbs = document.querySelectorAll('.proj-cb:checked');
+  var ids = [];
+  cbs.forEach(function(cb){if(cb.value)ids.push(cb.value);});
+  if (ids.length === 0) { alert('请先勾选要删除的项目'); return; }
+  if (!confirm('确定要删除选中的 '+ids.length+' 个项目吗？此操作不可撤销。')) return;
+  var done = 0, failed = 0;
+  for (var i = 0; i < ids.length; i++) {
+    try {
+      var r = await fetch(API_BASE + '/api/projects/' + encodeURIComponent(ids[i]), { method: 'DELETE' });
+      if (r.ok) done++; else failed++;
+    } catch(e) { failed++; }
+  }
+  if (failed > 0) alert('删除了 '+done+' 个，'+failed+' 个删除失败');
+  loadProjects();
+}
+
+function deleteProject(id, name) {
+  if (!id) return;
+  if (!confirm('确定要删除项目「'+name+'」吗？此操作不可撤销。')) return;
+  fetch(API_BASE + '/api/projects/' + encodeURIComponent(id), { method: 'DELETE' })
+  .then(function(r){if(r.ok)loadProjects();else alert('删除失败');})
+  .catch(function(e){alert('删除失败: '+e.message);});
+}
+
+// 重命名弹窗
+var _renameId = null;
+function showRenameModal(id, name) {
+  _renameId = id;
+  document.getElementById('renameInput').value = name;
+  document.getElementById('renameModal').style.display = 'flex';
+  document.getElementById('renameInput').focus();
+  document.getElementById('renameInput').select();
+}
+function doRename() {
+  var n = document.getElementById('renameInput').value.trim();
+  if (!n) return;
+  document.getElementById('renameModal').style.display = 'none';
+  fetch(API_BASE + '/api/projects/' + _renameId, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_name:n})})
+  .then(function(r){
+    if (!r.ok) return r.json().then(function(d){throw new Error(d.detail || '重命名失败')});
+    loadProjects();
+  }).catch(function(e){alert(e.message);});
+}
+function closeRename() { document.getElementById('renameModal').style.display = 'none'; }
+
+// ====== 项目选择器（文案/分镜/流水线） ======
+function loadProjectSelectors(selectProjectId) {
+  var selIds = ['psCopy', 'psShots', 'psPipeline'];
+  fetch(API_BASE + '/api/projects').then(function(r){return r.json()}).then(function(data){
+    var projs = Object.values(data);
+    var opts = '<option value="">— 选择项目 —</option>';
+    projs.forEach(function(p){ opts += '<option value="'+p.project_id+'">📁 '+(p.project_name||'未命名')+'</option>'; });
+    selIds.forEach(function(id){
+      var el = document.getElementById(id);
+      if (el) {
+              var v = selectProjectId !== undefined ? selectProjectId : (el.value || localStorage.getItem('wx_selected_project') || '');
+              el.innerHTML = opts;
+              if (v) el.value = v;
+            }
+    });
+  }).catch(function(){});
+}
+function onPsChange(tab, projectId) {
+  if (!projectId) return;
+  // 保存项目 ID 和名称到 localStorage
+  localStorage.setItem('wx_selected_project', projectId);
+  // 从选择器里找到对应的项目名称
+  var sel = document.getElementById('psCopy');
+  var opt = sel && sel.querySelector('option[value="'+projectId+'"]');
+  if (opt) localStorage.setItem('wx_selected_project_name', opt.textContent);
+  // 同步设置三个选择器的值（立即生效，不等 API）
+  ['psCopy', 'psShots', 'psPipeline'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.value = projectId;
+  });
+  // 异步刷新选项列表（保持最新）
+  loadProjectSelectors(projectId);
+  // tab 映射：copy→script, shots→shots, pipeline→pipeline
+  var tabMap = {copy:'script', shots:'shots', pipeline:'pipeline'};
+  // 三个 iframe 都刷新（同步项目）
+  ['copy', 'shots', 'pipeline'].forEach(function(t) {
+    var iframe = document.querySelector('#wx-'+t+' iframe');
+    if (iframe) iframe.src = '/zc/?tab='+tabMap[t]+'&project_id='+encodeURIComponent(projectId)+'&v='+Date.now();
+  });
+}
+// 页面加载时加载项目列表
+var savedProj = localStorage.getItem('wx_selected_project');
+var savedName = localStorage.getItem('wx_selected_project_name');
+if (savedProj) {
+  // 先直接插入选项（不管 API 是否可用）
+  ['psCopy', 'psShots', 'psPipeline'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) {
+      var opt = document.createElement('option');
+      opt.value = savedProj;
+      opt.textContent = savedName || '已选项目';
+      el.appendChild(opt);
+      el.value = savedProj;
+    }
+  });
+  // 同步刷新三个 iframe，让智创工具知道选中的项目
+  var tabMap = {copy:'script', shots:'shots', pipeline:'pipeline'};
+  ['copy', 'shots', 'pipeline'].forEach(function(t) {
+    var iframe = document.querySelector('#wx-'+t+' iframe');
+    if (iframe) iframe.src = '/zc/?tab='+tabMap[t]+'&project_id='+encodeURIComponent(savedProj)+'&v='+Date.now();
+  });
+}
+// 不管有没有保存的项目，都拉一次列表
+loadProjectSelectors(savedProj || undefined);
 </script>
+
+<!-- 重命名弹窗 -->
+<div id="renameModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;align-items:center;justify-content:center" onclick="if(event.target===this)closeRename()">
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:20px;width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+    <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:12px">重命名项目</div>
+    <input id="renameInput" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:13px;outline:none" onkeydown="if(event.key==='Enter')doRename()" autofocus>
+    <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+      <button class="wx-btn" onclick="closeRename()" style="padding:6px 16px">取消</button>
+      <button class="wx-btn" onclick="doRename()" style="background:#007acc;color:#fff;border-color:#007acc;padding:6px 16px">确认</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.wx-btn{border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text);font-size:12px;cursor:pointer;padding:4px 10px;white-space:nowrap}
+.wx-btn:hover{border-color:#007acc}
+.proj-bar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:6px}
+.proj-bar:hover{border-color:var(--border)}
+.proj-name{font-size:13px;font-weight:600;color:var(--text);width:120px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.proj-runs{display:flex;flex:1;gap:6px;overflow-x:auto;padding:2px 0}
+.run-mini{display:flex;align-items:center;gap:6px;padding:3px 8px;background:var(--bg);border:1px solid #333;border-radius:4px;flex-shrink:0}
+.run-mini:hover{border-color:var(--border)}
+.run-mini-status{font-size:10px;width:50px;flex-shrink:0}
+.run-mini-id{font-size:9px;color:var(--text2);width:55px;flex-shrink:0}
+.step-dot{width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:7px;cursor:pointer;transition:all .15s;border:1px solid transparent;flex-shrink:0}
+.step-dot:hover{transform:scale(1.3);border-color:#007acc}
+.step-dot.done{background:#2ecc71;color:#fff}
+.step-dot.fail{background:#e74c3c;color:#fff}
+.step-dot.skip{background:var(--bg3);color:var(--text2);border-color:var(--border)}
+.step-dot.running{background:#f39c12;color:#fff}
+/* 项目选择栏 */
+.proj-select-bar{display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0}
+.proj-select-bar .ps-label{font-size:12px;color:var(--text2);font-weight:600;white-space:nowrap}
+.proj-select-bar .ps-select{flex:1;max-width:300px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;cursor:pointer}
+.proj-select-bar .ps-select:hover{border-color:#007acc}
+.proj-select-bar .ps-select option{background:var(--bg);color:var(--text)}
+</style>
 </body>
 </html>

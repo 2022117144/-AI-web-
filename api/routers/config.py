@@ -14,10 +14,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Any, Dict, Optional
 
-# 直接从 万象AI-2改 导入 A0_config 模块
-from 任务运行文件 import A0_config
-
 router = APIRouter(prefix="/api", tags=["config"])
+
+
+def _get_config():
+    """延迟加载 A0_config（有 cv2 依赖）"""
+    from 任务运行文件 import A0_config
+    return A0_config
 
 
 class ConfigUpdate(BaseModel):
@@ -35,10 +38,11 @@ async def get_config():
     返回所有配置项。
     直接从 A0_config.config 字典读取。
     """
+    cfg = _get_config()
     return {
         "code": 200,
         "message": "success",
-        "data": A0_config.config
+        "data": cfg.config
     }
 
 
@@ -49,18 +53,19 @@ async def update_config(body: ConfigUpdate):
     接受 JSON body 中的 {updates: {key: value, ...}}，
     更新 A0_config.config 并调用 修改配置() 保存到文件。
     """
+    cfg = _get_config()
     updated = []
     not_found = []
 
     for key, value in body.updates.items():
-        if key in A0_config.config:
-            A0_config.config[key] = value
+        if key in cfg.config:
+            cfg.config[key] = value
             updated.append(key)
         else:
             not_found.append(key)
 
     # 保存到文件
-    A0_config.修改配置()
+    cfg.修改配置()
 
     return {
         "code": 200,

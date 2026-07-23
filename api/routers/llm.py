@@ -14,10 +14,6 @@ WANXIANG_2_SRC = r"E:\万象AI-2改\src"
 if WANXIANG_2_SRC not in sys.path:
     sys.path.insert(0, WANXIANG_2_SRC)
 
-# ── 导入 万象AI-2改 的 LLM 推理模块 ────────────────────────────────────
-from 任务运行文件.A2_网络请求 import 网络请求
-from 任务运行文件 import A0_config
-
 router = APIRouter(prefix="/api/llm", tags=["llm"])
 
 
@@ -64,6 +60,10 @@ async def chat(req: ChatRequest):
       - 接口地址 / other接口地址 → 自定义 API 地址
       - GPT_Token / other_key / doubao_key / tongyi_key → 对应 Key
     """
+    # 延迟加载（有 cv2 依赖）
+    from 任务运行文件.A2_网络请求 import 网络请求
+    from 任务运行文件 import A0_config
+
     try:
         # 选择模型：请求显式指定则覆盖配置中的默认值
         if req.model:

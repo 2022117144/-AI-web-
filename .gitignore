@@ -4,3 +4,5 @@ __pycache__/
 .venv/
 .orchestra/
 .env
+zc_backend/data/
+web_frontend/.hermes-tmp.*

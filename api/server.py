@@ -16,6 +16,11 @@ from api.routers import config as config_router
 from api.routers import llm as llm_router
 from api.routers import image as image_router
 from api.routers import video as video_router
+from api.routers import copy as copy_router
+from api.routers import project as project_router
+from api.routers import tools as tools_router
+from api.routers import pipeline as pipeline_router
+from api.routers import storyboard as storyboard_router
 
 app = FastAPI(
     title="万象AI改 API",
@@ -37,6 +42,11 @@ app.include_router(config_router.router)
 app.include_router(llm_router.router)
 app.include_router(image_router.router)
 app.include_router(video_router.router)
+app.include_router(copy_router.router)
+app.include_router(project_router.router)
+app.include_router(tools_router.router)
+app.include_router(pipeline_router.router)
+app.include_router(storyboard_router.router)
 
 # 挂载静态文件（Web 前端配置页面）
 import os
