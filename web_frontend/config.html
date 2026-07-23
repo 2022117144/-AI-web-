@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>万象AI - 软件设置</title>
+<style>
+  :root { --bg: #0f0f13; --card: #1a1a24; --text: #e8e8ee; --text2: #8888a0; --accent: #7c5cfc; --border: #2a2a3a; --success: #34d399; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 0; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; background: var(--card); border-bottom: 1px solid var(--border); }
+  .topbar h1 { font-size: 16px; }
+  .topbar-actions { display: flex; gap: 8px; }
+  .btn { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text2); }
+  .btn-outline:hover { border-color: var(--accent); color: var(--text); }
+  .container { display: flex; height: calc(100vh - 52px); }
+  .tabs { width: 160px; min-width: 160px; padding: 12px; border-right: 1px solid var(--border); }
+  .tab-btn { display: block; width: 100%; padding: 10px 12px; border: none; background: transparent; color: var(--text2); cursor: pointer; border-radius: 6px; text-align: left; font-size: 13px; margin-bottom: 2px; }
+  .tab-btn:hover { background: rgba(124,92,252,0.1); color: var(--text); }
+  .tab-btn.active { background: rgba(124,92,252,0.15); color: var(--accent); }
+  .tab-content { flex: 1; padding: 20px; overflow-y: auto; }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: flex; flex-direction: column; gap: 8px; }
+  .config-item { display: flex; align-items: center; padding: 8px 12px; background: var(--card); border-radius: 6px; border: 1px solid var(--border); }
+  .config-item label { width: 140px; font-size: 12px; color: var(--text2); flex-shrink: 0; }
+  .config-item input, .config-item select { flex: 1; padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); font-size: 13px; outline: none; }
+  .config-item input:focus, .config-item select:focus { border-color: var(--accent); }
+  .config-item input[type="checkbox"] { width: 16px; height: 16px; flex: none; }
+  .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 24px; border-radius: 8px; font-size: 13px; display: none; z-index: 999; }
+  .toast.success { background: #065f46; color: var(--success); display: block; }
+  .toast.error { background: #7f1d1d; color: var(--danger); display: block; }
+  .status-bar { font-size: 11px; color: var(--text2); display: flex; align-items: center; gap: 6px; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+  .back-link { color: var(--accent); text-decoration: none; font-size: 13px; margin-right: 12px; }
+  .back-link:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div style="display:flex;align-items:center;gap:12px">
+    <a href="/" class="back-link">← 返回主页</a>
+    <h1>⚙️ 软件设置</h1>
+  </div>
+  <div class="topbar-actions">
+    <span class="status-bar"><span class="status-dot"></span> 已连接</span>
+    <button class="btn btn-outline" onclick="loadConfig()">刷新</button>
+    <button class="btn btn-primary" onclick="saveConfig()">保存设置</button>
+  </div>
+</div>
+<div class="container">
+  <div class="tabs" id="tabNav"></div>
+  <div class="tab-content" id="tabContent"></div>
+</div>
+<div id="toast" class="toast"></div>
+<script>
+const API = '/api/config';
+let config = {}, changed = {};
+
+const TABS = [
+  { id: 'model', label: '🤖 模型配置', keys: ['ChatGPT端口','ChatGPT版本','GPT_Token','GPT4_Token','接口地址','other_key','other接口地址','tongyi_key','doubao_key','deepai_key','Kimi_key','推理模型','推理增强','推理关键词','模型选择'] },
+  { id: 'image', label: '🎨 图片配置', keys: ['SD版本','SD模型','VAE模型','图片采样方法','图片采样步数','调度器','高清修复算法','放大模式','图片长度','图片宽度','图片风格','绘图模式','ControlNet模型','animate_models','单批数量','极速绘图','云端地址','SD端口'] },
+  { id: 'video', label: '🎬 视频配置', keys: ['视频规格','动画模式','万相加速','视频模型','任务模式','视频推理','视频长度','视频分辨率','视频风格','转场样式','帧率','视频质量','导出格式','视频配音','视频字幕','视频背景音乐'] },
+  { id: 'keys', label: '🔑 API 密钥', keys: ['GPT_Token','GPT4_Token','other_key','tongyi_key','doubao_key','deepai_key','Kimi_key','MJ密钥','vidu密钥','HUB密钥','HUB工作流','HUB并发数','hub_plus','MJ请求参数','区域标识','微软密钥','阿里云Appkey','阿里云Secret','阿里云Key_ID'] },
+  { id: 'advanced', label: '⚡ 高级设置', keys: ['云端地址','显卡平台','显卡型号','语音平台','微软声音','微软角色','声音样式','字体大小','夜间模式','中文模式','海外模式','剪映草稿文件夹','镜像数量','项目ID','商城地址','商城上级','代理域名','版本号','版本更新'] },
+];
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  setTimeout(() => t.className = 'toast', 3000);
+}
+
+async function loadConfig() {
+  try {
+    const r = await fetch(API);
+    const d = await r.json();
+    config = d.data || d;
+    changed = {};
+    render();
+  } catch(e) {
+    showToast('加载失败: ' + e.message, 'error');
+  }
+}
+
+function render() {
+  const nav = document.getElementById('tabNav');
+  const content = document.getElementById('tabContent');
+  nav.innerHTML = '';
+  content.innerHTML = '';
+  let first = true;
+  for (const tab of TABS) {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (first ? ' active' : '');
+    btn.textContent = tab.label;
+    btn.onclick = () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      document.getElementById('pane-' + tab.id)?.classList.add('active');
+    };
+    nav.appendChild(btn);
+    const pane = document.createElement('div');
+    pane.className = 'tab-pane' + (first ? ' active' : '');
+    pane.id = 'pane-' + tab.id;
+    first = false;
+    for (const key of tab.keys) {
+      if (!(key in config)) continue;
+      const val = config[key];
+      const item = document.createElement('div');
+      item.className = 'config-item';
+      const label = document.createElement('label');
+      label.textContent = key;
+      item.appendChild(label);
+      if (typeof val === 'boolean') {
+        const inp = document.createElement('input');
+        inp.type = 'checkbox';
+        inp.checked = val;
+        inp.onchange = () => { config[key] = inp.checked; changed[key] = inp.checked; };
+        item.appendChild(inp);
+      } else if (key.includes('端口') || key.includes('版本') || key.includes('模式') || key.includes('风格') || key.includes('模型')) {
+        const sel = document.createElement('select');
+        const opts = ['','GPT官网','通义千问','豆包','其他平台','本地','万象GPT','gpt-3.5-turbo','gpt-4','gpt-4o','正常绘图','克隆模式','原创模式','视频转绘'];
+        for (const o of opts) {
+          const opt = document.createElement('option');
+          opt.value = o; opt.textContent = o;
+          if (o === val) opt.selected = true;
+          sel.appendChild(opt);
+        }
+        sel.onchange = () => { config[key] = sel.value; changed[key] = sel.value; };
+        item.appendChild(sel);
+      } else {
+        const inp = document.createElement('input');
+        inp.type = key.includes('密钥') || key.includes('Token') || key.includes('key') || key.includes('Key') ? 'password' : 'text';
+        inp.value = val || '';
+        inp.onchange = () => { config[key] = inp.value; changed[key] = inp.value; };
+        item.appendChild(inp);
+        if (key.includes('密钥') || key.includes('Token') || key.includes('key')) {
+          const toggle = document.createElement('button');
+          toggle.textContent = '👁';
+          toggle.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--text2);padding:0 4px;font-size:12px';
+          toggle.onclick = () => { inp.type = inp.type === 'password' ? 'text' : 'password'; };
+          item.appendChild(toggle);
+        }
+      }
+      pane.appendChild(item);
+    }
+    content.appendChild(pane);
+  }
+}
+
+async function saveConfig() {
+  if (Object.keys(changed).length === 0) { showToast('没有修改', 'error'); return; }
+  try {
+    const r = await fetch(API, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({updates: changed}) });
+    const d = await r.json();
+    if (d.code === 200) { showToast('保存成功', 'success'); changed = {}; }
+    else showToast('保存失败: ' + (d.message || '未知错误'), 'error');
+  } catch(e) {
+    showToast('保存失败: ' + e.message, 'error');
+  }
+}
+
+loadConfig();
+</script>
+</body>
+</html>
