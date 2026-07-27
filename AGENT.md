@@ -1,25 +1,33 @@
-# 万象AI改 — Agent 入口文档
+# 万象AI + 智创工具 — 项目规则
 
-## 协作风格
+## 项目定位
+自动化视频工作流平台。合并了智创AI Tools后端 + 万象AI平台。
 
-- 结论先行，先给结果再展开细节
-- 卡住直接说，不绕弯
-- 方案给 2-3 个选项 + 推荐，不替用户做决定
+## 技术栈
+- 后端：Python FastAPI，单端口 8765
+- 前端：纯 HTML/CSS/JS（无框架），web_frontend/
+- 数据库：JSON 文件存储（data/ 目录）
+- 依赖服务：insMind 后端 (8005) + insmind2api (5105)
 
-## 项目文档索引
+## 启动方式
+```bash
+cd D:\万象AI改
+python run.py
+```
+run.py 会自动启动 insMind (8005)、insmind2api (5105) 和主服务 (8765)。
 
-- `docs/SPEC.md` — 项目身份、核心决策、反向决策、模块边界
-- `docs/ADR/` — 架构决策记录（按编号排列）
-- **代码库**：`E:\万象AI-2改\src\` — 被调用的现有业务逻辑
-- **工作目录**：`D:\万象AI改\` — 本项目代码
+## 项目结构
+- `run.py` — 主入口，合并智创+万象路由，启动所有服务
+- `zc_backend/` — 智创后端（server.py, pipeline.py, handlers.py, llm.py 等）
+- `web_frontend/` — 前端静态文件（index.html, zc_index.html, css/, js/）
+- `data/` — JSON 数据文件（projects.json, pipeline_runs.json, llm_config.json 等）
+- `data/project_content/` — 项目内容（图片、视频提示词、文案等）
 
-## 关键路径
+## 端口
+- 8765 — 主服务（万象AI + 智创合并）
+- 8005 — insMind 后端
+- 5105 — insmind2api 中继
 
-| 路径 | 说明 |
-|------|------|
-| `E:\万象AI-2改\src\` | 现有业务逻辑，直接 import 不动它 |
-| `D:\万象AI改\api\` | FastAPI 接口层 |
-| `D:\万象AI改\web_frontend\` | 开发阶段 Web 前端 |
-| `D:\万象AI改\pyqt5_frontend\` | 交付阶段 PyQt5 前端 |
-| `D:\万象AI改\docs\SPEC.md` | 项目规范 |
-| `D:\万象AI改\docs\ADR\` | 架构决策记录 |
+## 注意
+- 运行前清除 PYTHONPATH/PYTHONHOME 防版本冲突
+- 依赖 venv 是系统 Python 3.11，不是独立 venv

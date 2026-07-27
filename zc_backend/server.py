@@ -62,7 +62,7 @@ pl.register_step_handler("bgm_send", hd.bgm_send_handler)
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 WORKFLOWS_DIR = BASE_DIR / "workflows"
-FRONTEND_DIR = BASE_DIR.parent / "frontend"
+FRONTEND_DIR = BASE_DIR.parent / "web_frontend"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 WORKFLOWS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -86,6 +86,32 @@ def serve_js(file: str):
 @app.head("/js/{file}")
 async def head_static(file: str): pass
 
+
+
+@app.get("/zc/")
+def serve_zc_root():
+    return FileResponse(str(FRONTEND_DIR / "zc_index.html"), headers=NO_CACHE_HEADERS)
+
+
+@app.get("/zc/{rest:path}")
+def serve_zc_static(rest: str):
+    fp = FRONTEND_DIR / rest
+    if fp.exists():
+        return FileResponse(str(fp), headers=NO_CACHE_HEADERS)
+    return FileResponse(str(FRONTEND_DIR / "zc_index.html"), headers=NO_CACHE_HEADERS)
+
+
+@app.get("/zc/")
+def serve_zc_root():
+    return FileResponse(str(FRONTEND_DIR / "zc_index.html"), headers=NO_CACHE_HEADERS)
+
+
+@app.get("/zc/{rest:path}")
+def serve_zc_static(rest: str):
+    fp = FRONTEND_DIR / rest
+    if fp.exists():
+        return FileResponse(str(fp), headers=NO_CACHE_HEADERS)
+    return FileResponse(str(FRONTEND_DIR / "zc_index.html"), headers=NO_CACHE_HEADERS)
 PROJECTS_FILE = DATA_DIR / "projects.json"
 PROJECT_CONTENT_DIR = DATA_DIR / "project_content"
 STYLES_FILE_INTERNAL = DATA_DIR / "builtin_styles.json"
@@ -444,11 +470,14 @@ def generate_script(req: ScriptGenerateRequest):
             f"风格：{req.style or '通用'}\n"
             f"语调：{req.tone}\n"
             f"目标时长：约{req.duration_seconds}秒\n\n"
-            f"要求：\n"
-            f"1. 写一段完整的旁白文案" + (f"，大约{req.word_count}字左右" if req.word_count > 0 else "") + "\n"
-            f"2. 用中文，口语化，有画面感，朗朗上口\n"
-            f"3. 把主题讲清楚，有起承转合\n"
-            f"4. 直接输出文案内容，不要额外说明，不要说你写了多少字"
+        f"要求：\n"
+        f"1. shots 数组每个元素对应一个镜头，prompt 用英文描述完整画面\n"
+        f"2. first_frame_prompt 描述该镜头开始时的画面（如物体刚出现、动作起始状态），用于生成首帧图片\n"
+        f"3. last_frame_prompt 描述该镜头结束时的画面（如物体到达位置、动作结束状态），用于生成尾帧图片\n"
+        f"4. 如果镜头是静态的（无运镜、无动作变化），first_frame_prompt 和 last_frame_prompt 可以接近或相同\n"
+        f"5. framing/motion/lighting/voiceover/video_prompt 是可选的，尽量根据剧情推断\n"
+        f"6. srt 数组每个元素对应一条字幕，时间轴与 shots 对齐\n"
+        f"7. 只输出 JSON，不要额外说明\n"
     )
 
     result = llm_mod.call_llm(
@@ -515,6 +544,8 @@ def analyze_script(req: ScriptGenerateRequest):
         f'      "index": 1,\n'
         f'      "scene": "场景描述（中文，20-40字）",\n'
         f'      "prompt": "画面提示词（英文，适合AI出图，30-60词）",\n'
+        f'      "first_frame_prompt": "该镜头开始时的画面描述（英文，用于生成首帧图片，15-30词）",\n'
+        f'      "last_frame_prompt": "该镜头结束时的画面描述（英文，用于生成尾帧图片，15-30词）",\n'
         f'      "duration": 3,\n'
         f'      "framing": "景别（可选：特写/近景/中景/全景）",\n'
         f'      "motion": "运镜（可选：固定/推轨/后拉/摇镜）",\n'
@@ -561,6 +592,10 @@ def analyze_script(req: ScriptGenerateRequest):
                     shot.setdefault("lighting", "")
                     shot.setdefault("voiceover", "")
                     shot.setdefault("video_prompt", "")
+                    shot.setdefault("first_frame_prompt", shot.get("prompt", ""))
+                    shot.setdefault("last_frame_prompt", shot.get("prompt", ""))
+                    shot.setdefault("first_frame_prompt", shot.get("prompt", ""))
+                    shot.setdefault("last_frame_prompt", shot.get("prompt", ""))
                 return {"shots": shots, "srt": srt, "generated": True}
             except:
                 pass
@@ -1014,14 +1049,7 @@ def generate_frame(req: FrameGenRequest):
             job_id = data["job_id"]
             image_url = _poll_photogpt_result(job_id)
             if image_url:
-                # 下载图片到项目文件夹
-                local_path = ""
-                if req.project_id:
-                    try:
-                        local_path = _download_to_project(req.project_id, "图片", image_url, f"shot_{req.shot_idx}_{req.mode}")
-                    except Exception as e:
-                        print(f"图片下载到本地失败: {e}")
-                return {"success": True, "image_url": image_url, "local_path": local_path, "job_id": job_id}
+                return {"success": True, "image_url": image_url, "job_id": job_id}
             return {"success": False, "error": "图片生成超时", "job_id": job_id}
         return {"success": False, "error": data.get("error", "提交失败")}
     except _httpx.ConnectError:

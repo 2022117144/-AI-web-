@@ -335,8 +335,18 @@ function switchTab(name) {
 // ========== 分镜分析 + SRT ==========
 async function analyzeScript() {
   if (!requireProject()) return;
-  const script = document.getElementById("storyInput").value.trim();
-  if (!script) { alert("请先在文案 Tab 生成或输入文案"); switchTab("script"); return; }
+  let script = document.getElementById("storyInput").value.trim();
+  if (!script) {
+    // 如果当前 iframe 的 storyInput 为空，尝试从 localStorage 恢复文案
+    script = localStorage.getItem("zctools_script") || "";
+    if (script) {
+      document.getElementById("storyInput").value = script;
+    } else {
+      alert("请先在文案 Tab 生成或输入文案");
+      switchTab("script");
+      return;
+    }
+  }
 
   const btn = document.getElementById("analyzeBtn");
   btn.disabled = true; btn.textContent = "⏳ 分析中...";
@@ -358,7 +368,7 @@ async function analyzeScript() {
                 // 自动标记流水线步骤3（SRT音频+分镜提示词）为已完成
                 markPipelineStep(3, "completed");
           } else {
-      alert("分析失败: " + (result.error || "未知错误"));
+      alert("分析失败: " + (typeof result.error === 'string' ? result.error : JSON.stringify(result.error || "未知错误")));
     }
   } catch (e) { alert("分析失败: " + e.message); }
   finally { btn.disabled = false; btn.textContent = "🔍 分析文案生成"; }
@@ -374,21 +384,78 @@ function renderShots(shots) {
   // 保存到 state 和 localStorage
   state.currentShots = shots;
   localStorage.setItem("zctools_shots_data", JSON.stringify(shots));
-  grid.innerHTML = shots.map((s, i) => `
-    <div class="shot-card" data-idx="${i}" onclick="selectShot(${i})">
-      <div class="shot-num">${i + 1}</div>
-      <div class="shot-body">
-        <div class="shot-scene">${s.scene || s.prompt || ""}</div>
-        <div class="shot-prompt">${s.prompt ? "🎨 " + (s.prompt.length > 40 ? s.prompt.slice(0, 40) + "..." : s.prompt) : ""}</div>
-        <div class="shot-duration">⏱ ${s.duration || 3}秒</div>
-      </div>
-    </div>
-  `).join("");
+  grid.innerHTML = shots.map((s, i) => {
+        // 首帧prompt：分镜1显示 first_frame_prompt，其他显示 last_frame_prompt（继承自上一分镜）
+        let framePrompt = "";
+        let frameFull = "";
+        if (i === 0 && s.first_frame_prompt) {
+          frameFull = s.first_frame_prompt;
+          framePrompt = "🖼首 " + (frameFull.length > 25 ? frameFull.slice(0, 25) + "..." : frameFull);
+        }
+        // 尾帧prompt：每个分镜都显示
+        let lastPrompt = "";
+        let lastFull = "";
+        if (s.last_frame_prompt) {
+          lastFull = s.last_frame_prompt;
+          lastPrompt = "🖼尾 " + (lastFull.length > 25 ? lastFull.slice(0, 25) + "..." : lastFull);
+        }
+        return `
+        <div class="shot-card" data-idx="${i}" onclick="selectShot(${i})">
+          <div class="shot-num">${i + 1}</div>
+          <div class="shot-body">
+            <div class="shot-scene">${s.scene || s.prompt || ""}</div>
+            <div class="shot-prompt">${s.prompt ? "🎨 " + (s.prompt.length > 40 ? s.prompt.slice(0, 40) + "..." : s.prompt) : ""}</div>
+            ${framePrompt ? `<div class="shot-frame-prompt">${framePrompt}${frameFull.length > 25 ? `<span class="frame-view-btn" onclick="event.stopPropagation();showPromptPopup('首帧', '${escapeStr(frameFull)}')">查看全部</span>` : ""}</div>` : ""}
+            ${lastPrompt ? `<div class="shot-frame-prompt">${lastPrompt}${lastFull.length > 25 ? `<span class="frame-view-btn" onclick="event.stopPropagation();showPromptPopup('尾帧', '${escapeStr(lastFull)}')">查看全部</span>` : ""}</div>` : ""}
+            <div class="shot-duration">⏱ ${s.duration || 3}秒</div>
+          </div>
+        </div>
+      `;
+      }).join("");
   // 默认选中第一个
-  selectShot(0);
+    selectShot(0);
+  }
+
+// 转义特殊字符，防止 HTML/JS 注入
+function escapeStr(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '\\x27').replace(/"/g, '&quot;');
 }
 
-function renderSRT(srtList) {
+// 非阻塞浮层：显示完整 prompt 文本
+function showPromptPopup(type, text) {
+  // 移除已有的浮层
+  var old = document.getElementById("promptPopup");
+  if (old) old.remove();
+
+  var popup = document.createElement("div");
+  popup.id = "promptPopup";
+  popup.className = "prompt-popup";
+  popup.innerHTML =
+    '<div class="prompt-popup-header"><span class="prompt-popup-title">' + type + '完整提示词</span><span class="prompt-popup-close" onclick="closePromptPopup()">✕</span></div>' +
+    '<div class="prompt-popup-body">' + escapeStr(text) + '</div>';
+
+  document.body.appendChild(popup);
+
+  // 点击外部关闭
+  setTimeout(function() {
+    document.addEventListener("click", closePromptPopupOutside, false);
+  }, 10);
+}
+
+function closePromptPopup() {
+  var popup = document.getElementById("promptPopup");
+  if (popup) popup.remove();
+  document.removeEventListener("click", closePromptPopupOutside, false);
+}
+
+function closePromptPopupOutside(e) {
+  var popup = document.getElementById("promptPopup");
+  if (popup && !popup.contains(e.target)) {
+    closePromptPopup();
+  }
+}
+
+  function renderSRT(srtList) {
   const srtEl = document.getElementById("srtOutput");
   if (!srtEl) return;
   if (!srtList || srtList.length === 0) { srtEl.value = "（未生成字幕）"; return; }
@@ -566,30 +633,32 @@ function genFirstFrame() {
   const shot = state.currentShots && state.currentShots[idx];
   if (!shot) { alert("分镜数据不存在"); return; }
 
-  const prompt = shot.enhanced_prompt || shot.prompt || shot.scene || "";
+  // 首帧用 first_frame_prompt，降级到通用 prompt
+  const prompt = shot.first_frame_prompt || shot.enhanced_prompt || shot.prompt || shot.scene || "";
   if (!prompt) { alert("该分镜无 prompt"); return; }
 
   const btn = document.getElementById("genFirstBtn");
   btn.disabled = true; btn.textContent = "⏳";
 
   api("/generate-frame", {
-      body: { prompt: prompt, aspect_ratio: "16:9", mode: "first_frame", project_id: state.currentProject ? state.currentProject.project_id : "", shot_idx: idx }
-    }).then(res => {
-      if (res.success && res.image_url) {
-        saveShotData(idx, { firstFrame: res.image_url, firstFrameUploaded: "", firstFrameApiUrl: res.image_url });
-        selectShot(idx);
+        body: { prompt: prompt, aspect_ratio: "16:9", mode: "first_frame", project_id: state.currentProject ? state.currentProject.project_id : "", shot_idx: idx }
+      }).then(res => {
+        if (res.success && res.image_url) {
+                  saveShotData(idx, { firstFrame: res.image_url, firstFrameUploaded: "", firstFrameApiUrl: res.image_url });
+                  selectShot(idx);
+                  btn.disabled = false; btn.textContent = "🖼";
+              } else {
+                  var errMsg = typeof res.error === 'string' ? res.error : JSON.stringify(res.error || "未知错误");
+                  alert("首帧生成失败: " + errMsg);
+                  btn.disabled = false; btn.textContent = "🖼";
+                }
+              }).catch(e => {
+        alert("首帧生成失败: " + e.message);
         btn.disabled = false; btn.textContent = "🖼";
-    } else {
-      alert("首帧生成失败: " + (res.error || "未知错误"));
-      btn.disabled = false; btn.textContent = "🖼";
+      });
     }
-  }).catch(e => {
-    alert("首帧生成失败: " + e.message);
-    btn.disabled = false; btn.textContent = "🖼";
-  });
-}
 
-function genLastFrame() {
+    function genLastFrame() {
   if (!requireProject()) return;
   const idx = parseInt(document.getElementById("lastFrameImage").dataset.shotIdx);
   if (isNaN(idx)) { alert("请先选择一个分镜"); return; }
@@ -603,17 +672,17 @@ function genLastFrame() {
   btn.disabled = true; btn.textContent = "⏳";
 
   api("/generate-frame", {
-      body: { prompt: prompt + ", end frame, concluding scene", aspect_ratio: "16:9", mode: "last_frame", project_id: state.currentProject ? state.currentProject.project_id : "", shot_idx: idx }
-    }).then(res => {
-    if (res.success && res.image_url) {
-      saveShotData(idx, { lastFrame: res.image_url, lastFrameUploaded: "", lastFrameApiUrl: res.image_url });
-      selectShot(idx);
-      btn.disabled = false; btn.textContent = "🖼";
-    } else {
-      alert("尾帧生成失败: " + (res.error || "未知错误"));
-      btn.disabled = false; btn.textContent = "🖼";
-    }
-  }).catch(e => {
+        body: { prompt: prompt + ", end frame, concluding scene", aspect_ratio: "16:9", mode: "last_frame", project_id: state.currentProject ? state.currentProject.project_id : "", shot_idx: idx }
+      }).then(res => {
+        if (res.success && res.image_url) {
+          saveShotData(idx, { lastFrame: res.image_url, lastFrameUploaded: "", lastFrameApiUrl: res.image_url });
+          selectShot(idx);
+          btn.disabled = false; btn.textContent = "🖼";
+        } else {
+        alert("尾帧生成失败: " + (typeof res.error === 'string' ? res.error : JSON.stringify(res.error || "未知错误")));
+        btn.disabled = false; btn.textContent = "🖼";
+      }
+    }).catch(e => {
     alert("尾帧生成失败: " + e.message);
     btn.disabled = false; btn.textContent = "🖼";
   });
@@ -626,7 +695,8 @@ function genShotVideo() {
   const shot = state.currentShots && state.currentShots[idx];
   if (!shot) { alert("分镜数据不存在"); return; }
 
-  const prompt = shot.enhanced_prompt || shot.prompt || shot.scene || "";
+  // 尾帧用 last_frame_prompt，降级到通用 prompt
+  const prompt = shot.last_frame_prompt || shot.enhanced_prompt || shot.prompt || shot.scene || "";
   if (!prompt) { alert("该分镜无 prompt"); return; }
 
   const shotData = loadShotData(idx);
@@ -658,7 +728,7 @@ function genShotVideo() {
       selectShot(idx);
       btn.disabled = false; btn.textContent = "🎬 生成视频";
     } else {
-      alert("视频生成失败: " + (res.error || "未知错误"));
+      alert("视频生成失败: " + (typeof res.error === 'string' ? res.error : JSON.stringify(res.error || "未知错误")));
       btn.disabled = false; btn.textContent = "🎬 生成视频";
     }
   }).catch(e => {
