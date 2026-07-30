@@ -123,8 +123,9 @@ body{background:var(--bg)}
         <div class="shots-title">📋 分镜列表</div>
         <div class="shots-actions">
           <button class="btn btn-sm btn-primary" onclick="analyzeScript()" id="analyzeBtn">🔍 分析文案生成</button>
-          <button class="btn btn-sm btn-outline" onclick="batchGenFrames()" id="batchGenBtn" style="margin-left:4px">🖼 批量生成所有图片</button>
+          <button class="btn btn-sm btn-primary" onclick="batchGenFrames()" id="batchGenBtn" style="margin-left:4px">🖼 批量生成所有图片</button>
           <button class="btn btn-sm btn-danger" onclick="cancelBatchFrames()" id="cancelBatchBtn" style="margin-left:4px;display:none">⏹ 暂停</button>
+          <button class="btn btn-sm btn-primary" onclick="batchGenVideos()" id="batchVideoBtn" style="margin-left:4px">🎬 一键生成视频</button>
         </div>
       </div>
       <div class="shots-srt-bar" id="srtBar">

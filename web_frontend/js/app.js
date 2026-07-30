@@ -1067,12 +1067,93 @@ async function batchGenFrames() {
             document.getElementById("cancelBatchBtn").style.display = "none";
 
             alert("已暂停批量生成");
-          }
+                      }
 
-          function genShotVideo() {
-  if (!requireProject()) return;
-  const idx = state.selectedShotIdx;
-  if (idx === undefined || idx === null) { alert("请先选择一个分镜"); return; }
+                      /**
+                       * 一键生成所有分镜的视频 — 检查每个分镜是否都有首尾帧，有则生成视频
+                       */
+                      async function batchGenVideos() {
+                        if (!requireProject()) return;
+                        const shots = state.currentShots;
+                        if (!shots || shots.length === 0) { alert("没有分镜数据"); return; }
+
+                        // 检查每个分镜是否有首尾帧
+                        const missing = [];
+                        for (let i = 0; i < shots.length; i++) {
+                          const shotData = loadShotData(i);
+                          const prevData = i > 0 ? loadShotData(i - 1) : null;
+                          const firstFrame = shotData.firstFrame || shotData.firstFrameUploaded ||
+                            (i > 0 ? (prevData.lastFrame || prevData.lastFrameUploaded) : null);
+                          const lastFrame = shotData.lastFrame || shotData.lastFrameUploaded;
+                          if (!firstFrame) missing.push({ idx: i, type: "首帧" });
+                          if (!lastFrame) missing.push({ idx: i, type: "尾帧" });
+                        }
+
+                        if (missing.length > 0) {
+                                                  const msg = missing.map(m => `#${m.idx + 1} ${m.type}`).join("、");
+                                                  alert(`缺少首尾帧，无法生成视频：${msg}\n请先生成图片`);
+                                                  return;
+                                                }
+
+                                                // 检查 insMind 可用账号数是否足够
+                                                                        let availableAccounts = 0;
+                                                                        try {
+                                                                          const acctResp = await fetch("http://localhost:8005/api/accounts/count").then(r => r.json());
+                                                                          availableAccounts = acctResp && acctResp.success ? acctResp.success : 0;
+                                                                        } catch (e) {
+                                                                          // 接口失败，默认允许（不阻塞）
+                                                                          availableAccounts = 999;
+                                                                        }
+                                                const needed = shots.length;
+                                                if (availableAccounts < needed) {
+                                                  alert(`insMind 可用账号不足：需要 ${needed} 个账号，当前可用 ${availableAccounts} 个\n请先注册新账号或等待额度重置`);
+                                                  return;
+                                                }
+
+                                                const btn = document.getElementById("batchVideoBtn");
+                        btn.disabled = true;
+                        btn.textContent = "⏳ 生成中...";
+
+                        const tasks = [];
+                        for (let i = 0; i < shots.length; i++) {
+                          tasks.push({ idx: i });
+                        }
+
+                        // 同步提交所有视频生成请求
+                        const results = await Promise.allSettled(
+                          tasks.map(t => new Promise(resolve => {
+                            genShotVideo(t.idx);
+                            // 轮询等待视频生成完成（shotData.video 有值）
+                            const check = setInterval(() => {
+                              const sd = loadShotData(t.idx);
+                              if (sd && sd.video) {
+                                clearInterval(check);
+                                resolve({ status: "fulfilled" });
+                              }
+                            }, 500);
+                            setTimeout(() => { clearInterval(check); resolve({ status: "fulfilled" }); }, 600000); // 10分钟超时
+                          }))
+                        );
+
+                        let success = 0;
+                        let fail = 0;
+                        for (const r of results) {
+                          if (r.status === "fulfilled") success++;
+                          else fail++;
+                        }
+
+                        if (state.selectedShotIdx !== null) selectShot(state.selectedShotIdx);
+                        if (state.currentProject) await saveProjectContent();
+
+                        btn.disabled = false;
+                        btn.textContent = "🎬 一键生成视频";
+                        alert(`视频生成完成！成功 ${success} 个，失败 ${fail} 个`);
+                      }
+
+                      function genShotVideo(idx) {
+            if (!requireProject()) return;
+            if (idx === undefined) idx = state.selectedShotIdx;
+            if (idx === undefined || idx === null) { alert("请先选择一个分镜"); return; }
   const shot = state.currentShots && state.currentShots[idx];
   if (!shot) { alert("分镜数据不存在"); return; }
 
@@ -1088,10 +1169,13 @@ async function batchGenFrames() {
     (idx > 0 ? (prevData.lastFrame || prevData.lastFrameUploaded) : null);
   const lastFrame = shotData.lastFrame || shotData.lastFrameUploaded;
 
-  const btn = document.getElementById("genVideoBtn");
-  btn.disabled = true; btn.textContent = "⏳ 生成中...";
+    const isSingle = idx === state.selectedShotIdx;
+    const btn = document.getElementById("genVideoBtn");
+    if (isSingle) {
+      btn.disabled = true; btn.textContent = "⏳ 生成中...";
+    }
 
-  api("/generate-video", {
+    api("/generate-video", {
       body: {
         prompt: prompt,
         first_frame: firstFrame || "",
@@ -1104,19 +1188,19 @@ async function batchGenFrames() {
         shot_idx: idx,
       },
   }).then(res => {
-      if (res.success && res.video_url) {
-        saveShotData(idx, { video: res.video_url });
-        selectShot(idx);
-        btn.disabled = false; btn.textContent = "🎬 生成视频";
-        // 保存到后端
-        if (state.currentProject) saveProjectContent();
-      } else {
-      alert("视频生成失败: " + (typeof res.error === 'string' ? res.error : JSON.stringify(res.error || "未知错误")));
-      btn.disabled = false; btn.textContent = "🎬 生成视频";
-    }
-  }).catch(e => {
-    alert("视频生成失败: " + e.message);
-    btn.disabled = false; btn.textContent = "🎬 生成视频";
+        if (res.success && res.video_url) {
+          saveShotData(idx, { video: res.video_url });
+          selectShot(idx);
+          if (isSingle) { btn.disabled = false; btn.textContent = "🎬 生成视频"; }
+          // 保存到后端
+          if (state.currentProject) saveProjectContent();
+        } else {
+        alert("视频生成失败: " + (typeof res.error === 'string' ? res.error : JSON.stringify(res.error || "未知错误")));
+        if (isSingle) { btn.disabled = false; btn.textContent = "🎬 生成视频"; }
+      }
+    }).catch(e => {
+      alert("视频生成失败: " + e.message);
+      if (isSingle) { btn.disabled = false; btn.textContent = "🎬 生成视频"; }
   });
 }
 
