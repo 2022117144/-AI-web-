@@ -17,8 +17,8 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 DREAMINA_API = "http://localhost:8005"
-POLL_INTERVAL = 3  # 秒
-MAX_POLL = 60      # 最大轮询次数 (≈3分钟)
+POLL_INTERVAL = 60  # 秒
+MAX_POLL = 4         # 最大轮询次数 (≈4分钟)
 
 # ============================================================
 # photogpt: 分镜图片生成
@@ -56,6 +56,7 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
     规则：
       - 镜头1：生成首帧 + 尾帧（2张）
       - 镜头2+：只生成尾帧（首帧继承上一镜尾帧）
+    同步提交所有请求，再一起轮询等待结果。
     step_config 期望:
       - shots: [{index, scene, prompt, enhanced_prompt, duration}]
       - aspect_ratio: "16:9" (可选)
@@ -68,15 +69,28 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
     ar_map = {"16:9": "16:9", "9:16": "9:16", "1:1": "1:1", "4:3": "4:3"}
     photogpt_ar = ar_map.get(aspect_ratio, "16:9")
 
-    # 每个分镜的帧数据
-    shot_frames = {}  # {index: {"first_frame": url, "last_frame": url}}
-    errors = []
-
-    def _submit_and_wait(prompt: str, shot_idx: int, frame_type: str) -> str:
-        """提交 photogpt 并轮询，返回图片 URL"""
+    # 第一步：收集所有需要提交的任务
+    tasks = []  # [(shot_idx, frame_type, prompt)]
+    for shot in shots:
+        idx = shot.get("index", 0)
+        prompt = shot.get("enhanced_prompt") or shot.get("prompt", "")
         if not prompt:
-            return ""
-        logger.info(f"📷 photogpt: 分镜 #{shot_idx} {frame_type}...")
+            logger.warning(f"分镜 #{idx} 无 prompt，跳过")
+            continue
+        # 首帧：只有镜头1才生成
+        if idx == 0:
+            tasks.append((idx, "first_frame", prompt))
+        # 尾帧：所有镜头都生成
+        tasks.append((idx, "last_frame", prompt + ", end frame, concluding scene, zoom out"))
+
+    if not tasks:
+        return {"success": True, "output": {"images": [], "message": "无任务"}, "error": ""}
+
+    logger.info(f"📷 photogpt: 同步提交 {len(tasks)} 个任务...")
+
+    # 第二步：同步提交所有任务，收集 job_id
+    submitted = []  # [(shot_idx, frame_type, job_id)]
+    for shot_idx, frame_type, prompt in tasks:
         try:
             resp = httpx.post(
                 f"{DREAMINA_API}/api/photogpt/generate",
@@ -84,43 +98,39 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
                 timeout=30,
             )
             data = resp.json()
-            if not data.get("success"):
-                logger.warning(f"  {frame_type} 提交失败: {data.get('error','')}")
-                return ""
-            job_id = data["job_id"]
-            poll_result = _photogpt_poll_job(job_id)
-            if poll_result.get("success"):
-                urls = poll_result.get("urls", [])
-                if urls:
-                    logger.info(f"  ✅ {frame_type}: {urls[0][:60]}...")
-                    return urls[0]
+            if data.get("success"):
+                job_id = data["job_id"]
+                submitted.append((shot_idx, frame_type, job_id))
+                logger.info(f"  📤 分镜 #{shot_idx} {frame_type} → job_id={job_id}")
             else:
-                logger.warning(f"  {frame_type} 生成失败: {poll_result.get('error','')}")
+                logger.warning(f"  ❌ 分镜 #{shot_idx} {frame_type} 提交失败: {data.get('error','')}")
         except Exception as e:
-            logger.warning(f"  {frame_type} 异常: {e}")
-        return ""
+            logger.warning(f"  ❌ 分镜 #{shot_idx} {frame_type} 提交异常: {e}")
 
-    for shot in shots:
-        idx = shot.get("index", 0)
-        prompt = shot.get("enhanced_prompt") or shot.get("prompt", "")
-        if not prompt:
-            logger.warning(f"分镜 #{idx} 无 prompt，跳过")
-            shot_frames[idx] = {"first_frame": "", "last_frame": ""}
-            continue
+    # 第三步：一起轮询所有 job
+    shot_frames = {}  # {index: {"first_frame": url, "last_frame": url}}
+    for idx in range(len(shots)):
+        shot_frames[idx] = {"first_frame": "", "last_frame": ""}
 
-        # 首帧：只有镜头1才生成，其他继承上一镜尾帧
-        if idx == 0:
-            first_url = _submit_and_wait(prompt, idx, "首帧")
+    for shot_idx, frame_type, job_id in submitted:
+        logger.info(f"  ⏳ 等待 分镜 #{shot_idx} {frame_type} (job_id={job_id})...")
+        poll_result = _photogpt_poll_job(job_id)
+        if poll_result.get("success"):
+            urls = poll_result.get("urls", [])
+            if urls:
+                shot_frames[shot_idx][frame_type] = urls[0]
+                logger.info(f"  ✅ 分镜 #{shot_idx} {frame_type}: {urls[0][:60]}...")
+            else:
+                logger.warning(f"  ⚠️ 分镜 #{shot_idx} {frame_type} 返回空 URL")
         else:
-            prev_last = shot_frames.get(idx - 1, {}).get("last_frame", "")
-            first_url = prev_last  # 继承上一镜尾帧
+            logger.warning(f"  ❌ 分镜 #{shot_idx} {frame_type} 生成失败: {poll_result.get('error','')}")
+
+    # 继承：镜头2+的首帧继承上一镜尾帧
+    for idx in range(1, len(shots)):
+        prev_last = shot_frames.get(idx - 1, {}).get("last_frame", "")
+        if prev_last and not shot_frames[idx].get("first_frame"):
+            shot_frames[idx]["first_frame"] = prev_last
             logger.info(f"  📎 分镜 #{idx} 首帧继承自上一镜尾帧")
-
-        # 尾帧：所有镜头都生成
-        last_prompt = prompt + ", end frame, concluding scene, zoom out"
-        last_url = _submit_and_wait(last_prompt, idx, "尾帧")
-
-        shot_frames[idx] = {"first_frame": first_url, "last_frame": last_url}
 
     # 构建输出
     results = []

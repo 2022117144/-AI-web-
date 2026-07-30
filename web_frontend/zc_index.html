@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>智创工具</title>
-<link rel="stylesheet" href="css/style.css?v=5">
+<link rel="stylesheet" href="css/style.css?v=6">
 <style>
 body{background:var(--bg)}
 #header{display:none!important}
@@ -88,7 +88,7 @@ body{background:var(--bg)}
     <!-- 文案 Tab -->
     <div class="tab-content active" id="tab-script">
       <div class="script-generate-bar">
-        <input id="scriptTopic" class="inp-full script-topic-input" placeholder="输入视频主题，如：一个关于春天的小故事" maxlength="200">
+        <input id="scriptTopic" class="inp-full script-topic-input" placeholder="输入文案主题，如：一个关于春天的小故事" maxlength="200">
         <button class="btn btn-primary btn-sm" onclick="generateScript()" id="genScriptBtn">✨ AI 生成</button>
       </div>
       <div class="script-options-bar">
@@ -103,7 +103,8 @@ body{background:var(--bg)}
           <option value="builtin_general">通用叙事</option>
         </select>
         <button class="btn btn-sm btn-outline" onclick="showPromptModal()" title="管理提示词" style="font-size:11px">✎</button>
-        <input id="scriptWordCount" class="inp-sm" type="number" value="" min="0" max="1000" style="width:60px" placeholder="字数">
+        <input id="scriptWordCount" class="inp-sm" type="text" inputmode="numeric" value="" min="0" max="1000" style="width:60px" placeholder="字数" autocomplete="off">
+        <span id="charCount" style="font-size:11px;color:var(--text-muted);margin-left:6px;white-space:nowrap">0 字</span>
         <button class="btn btn-sm btn-outline" onclick="generateScript()" style="display:none" id="dummyBtn"></button>
       </div>
       <div class="prompt-preview-bar" id="promptPreview">选择一种风格，AI 将按此风格生成文案</div>
@@ -122,6 +123,8 @@ body{background:var(--bg)}
         <div class="shots-title">📋 分镜列表</div>
         <div class="shots-actions">
           <button class="btn btn-sm btn-primary" onclick="analyzeScript()" id="analyzeBtn">🔍 分析文案生成</button>
+          <button class="btn btn-sm btn-outline" onclick="batchGenFrames()" id="batchGenBtn" style="margin-left:4px">🖼 批量生成所有图片</button>
+          <button class="btn btn-sm btn-danger" onclick="cancelBatchFrames()" id="cancelBatchBtn" style="margin-left:4px;display:none">⏹ 暂停</button>
         </div>
       </div>
       <div class="shots-srt-bar" id="srtBar">
@@ -211,6 +214,33 @@ body{background:var(--bg)}
 
     <!-- 设置 Tab -->
     <div class="tab-content" id="tab-settings">
+      <div class="settings-section" id="char-scene-section">
+        <div class="char-project-bar" style="margin-bottom:8px">
+          <span class="ps-label">📁 项目</span>
+          <select class="ps-select" id="psSettings" onchange="switchProject(this.value)">
+            <option value="">— 选择项目 —</option>
+          </select>
+        </div>
+        <div class="char-scene-divider">
+          <div class="char-scene-block">
+            <div class="settings-title">🎭 角色管理</div>
+            <div class="char-project-bar">
+              <button class="btn btn-sm btn-primary" onclick="addCharacter()" id="addCharBtn">+ 添加角色</button>
+            </div>
+            <div id="charList" class="char-list"></div>
+          </div>
+          <div class="char-scene-block">
+            <div class="settings-title">🏞️ 场景管理</div>
+            <div class="char-project-bar">
+              <button class="btn btn-sm btn-primary" onclick="addScene()" id="addSceneBtn">+ 添加场景</button>
+            </div>
+            <div id="sceneList" class="char-list"></div>
+          </div>
+        </div>
+      </div>
+
+      
+
       <div class="settings-section">
         <div class="settings-title">🤖 LLM 中转站配置</div>
         <p class="settings-hint">配置 LLM API 用于文案增强和分镜拆分。API Key 保存在独立目录，不会写入代码。</p>
@@ -223,48 +253,44 @@ body{background:var(--bg)}
           <div class="model-select-wrap">
             <input id="llmModel" class="inp-full" list="modelList" placeholder="deepseek-v4-flash">
             <datalist id="modelList"></datalist>
-            <button class="btn btn-sm btn-outline" onclick="fetchModels()" id="fetchModelsBtn" title="获取可用模型列表">🔄 刷新</button>
           </div>
         </div>
         <div class="settings-row">
-          <label class="settings-label">API Key <span style="color:var(--red)">*</span></label>
-          <input id="llmApiKey" class="inp-full" type="password" placeholder="sk-...">
-          <span id="llmKeyStatus" class="settings-status"></span>
+          <label class="settings-label">API Key</label>
+          <input id="newKeyInput" class="inp-full" type="text" placeholder="输入新的 API Key..." autocomplete="off" data-1p-ignore style="flex:1">
         </div>
         <div class="settings-actions">
-          <button class="btn btn-outline" onclick="testLLMConfig()">📡 ① 测试连接</button>
-          <button class="btn btn-primary" onclick="saveLLMConfig()" style="margin-left:4px">💾 ② 保存配置</button>
+          <button class="btn btn-outline" onclick="testLLMConfig()">📡 测试连接</button>
+          <button class="btn btn-primary" onclick="saveLLMConfig()" style="margin-left:4px">💾 添加并保存</button>
           <span id="llmTestResult" class="settings-test-result"></span>
         </div>
         <div class="settings-info" id="llmConfigInfo"></div>
+        <div id="modelListDropdown" class="model-dropdown" style="display:none"></div>
+
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+          <div class="settings-title" style="font-size:13px">🔑 API Key 管理</div>
+          <p class="settings-hint" style="margin-bottom:8px">自动轮询：一个挂了自动切到下一个。点击可切换当前使用的 Key。</p>
+          <div id="llmKeyList" class="key-list"></div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-title">🎬 视频生成模型</div>
+        <p class="settings-hint">选择视频生成使用的 AI 模型。</p>
+        <div class="settings-row">
+          <label class="settings-label">模型</label>
+          <select id="videoModelSelect" class="sel-full" onchange="onVideoModelChange()">
+            <option value="Seedance-2.0-Mini" selected>Seedance 2.0 Mini</option>
+            <option value="Pixverse-V6.0">Pixverse V6.0</option>
+            <option value="Wan-2.2">Wan 2.2</option>
+          </select>
+        </div>
       </div>
 
       <div class="settings-section">
         <div class="settings-title">🔊 TTS 语音</div>
         <p class="settings-hint">旁白配音使用 edge-tts（免费本地），无需配置。</p>
         <div class="settings-info">已就绪 ✅ 可选语音：zh-CN-XiaoxiaoNeural（女声）、zh-CN-YunxiNeural（男声）</div>
-      </div>
-
-      <div class="settings-section" id="characters-section">
-        <div class="settings-title">🎭 角色管理</div>
-        <p class="settings-hint">定义视频中的角色，用于分镜生成时融入角色特征。</p>
-        <div class="char-form">
-          <input id="charName" class="inp-sm" placeholder="角色名">
-          <input id="charStyle" class="inp-md" placeholder="风格描述（如：年轻男性，古装侠客）">
-          <select id="charGender" class="inp-sm">
-            <option value="男">男</option>
-            <option value="女">女</option>
-          </select>
-          <input id="charVoice" class="inp-sm" placeholder="音色（沉稳/活泼/温柔）">
-          <button class="btn btn-sm btn-primary" onclick="addCharacter()">+ 添加</button>
-        </div>
-        <div id="charList" class="char-list"></div>
-      </div>
-
-      <div class="settings-section">
-        <div class="settings-title">📁 API Key 存储位置</div>
-        <p class="settings-hint">所有 API Key 保存在独立目录，与源代码分离。</p>
-        <div class="settings-info path-info">backend/data/credentials/</div>
       </div>
     </div>
 
@@ -318,12 +344,7 @@ body{background:var(--bg)}
   </div>
 </div>
 
-<!-- ====== 底部任务栏 ====== -->
-<div id="taskBar">
-  <div class="task-list" id="taskList">
-    <div class="task-placeholder">暂无生成任务</div>
-  </div>
-</div>
+
 
 <!-- ====== 新建项目弹窗 ====== -->
 <div class="modal-overlay" id="newProjectModal">

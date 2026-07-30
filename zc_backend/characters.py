@@ -60,7 +60,7 @@ def update_character(project_id: str, char_id: str, updates: Dict[str, Any]) -> 
     chars = _load(project_id)
     for c in chars:
         if c["id"] == char_id:
-            for key in ("name", "style", "voice", "reference_image", "description"):
+            for key in ("name", "style", "voice", "reference_image", "description", "three_view", "uploaded_image"):
                 if key in updates:
                     c[key] = updates[key]
             c["updated_at"] = datetime.now().isoformat()

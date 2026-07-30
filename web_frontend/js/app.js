@@ -16,6 +16,9 @@ let state = {
   currentShots: [],
   selectedShotIdx: null,
   lastRunId: null,
+  // 每个分镜的生成状态 { [idx]: { first: bool, last: bool } }
+  // 初始化时先留空，切换项目时从 localStorage 恢复
+  shotGenerating: {},
 };
 
 // ========== 初始化 ==========
@@ -28,10 +31,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 恢复上次的文案
   const saved = localStorage.getItem("zctools_script");
   if (saved) document.getElementById("storyInput").value = saved;
-  // 自动保存文案到 localStorage（也自动存到项目）
-  document.getElementById("storyInput").addEventListener("input", function() {
-    localStorage.setItem("zctools_script", this.value);
-  });
+  // 自动保存文案到 localStorage（也自动存到项目）+ 实时字数统计
+    document.getElementById("storyInput").addEventListener("input", function() {
+      localStorage.setItem("zctools_script", this.value);
+      updateCharCount();
+    });
+    // 初始化字数统计
+    updateCharCount();
   // 恢复上次的分镜和SRT
   const savedShots = localStorage.getItem("zctools_shots");
   const savedSrt = localStorage.getItem("zctools_srt");
@@ -134,6 +140,26 @@ function onStyleChange() {
   document.getElementById("charAnchorText").textContent = style ? style.character_anchor : "（未选择）";
 }
 
+// 视频模型切换
+function getVideoModel() {
+  var sel = document.getElementById("videoModelSelect");
+  if (sel && sel.value) return sel.value;
+  var saved = localStorage.getItem("zctools_video_model");
+  return saved || "Seedance-2.0-Mini";
+}
+function onVideoModelChange() {
+  const sel = document.getElementById("videoModelSelect");
+  if (!sel) return;
+  localStorage.setItem("zctools_video_model", sel.value);
+}
+
+function restoreVideoModel() {
+  var sel = document.getElementById("videoModelSelect");
+  if (!sel) return;
+  var saved = localStorage.getItem("zctools_video_model");
+  if (saved) sel.value = saved;
+}
+
 // ========== 项目内容持久化 ==========
 async function saveProjectContent() {
   if (!state.currentProject) return;
@@ -157,6 +183,9 @@ async function saveProjectContent() {
 }
 
 async function loadProjectContent(projectId, clearIfEmpty = false) {
+  // 恢复该项目的生成中状态和选中分镜
+  const genKey = "zctools_shot_generating_" + projectId;
+  state.shotGenerating = JSON.parse(localStorage.getItem(genKey) || "{}");
   let hasData = false;
   try {
     const content = await api("/projects/" + projectId + "/content");
@@ -191,11 +220,13 @@ async function loadProjectContent(projectId, clearIfEmpty = false) {
         if (content.grid_size && document.getElementById("gridSizeSelect")) {
           document.getElementById("gridSizeSelect").value = content.grid_size;
         }
-        // 重新选中第一个分镜
-        if (content.shots && content.shots.length > 0) {
-          selectShot(0);
-          changeGridSize(0);
-        }
+        // 重新选中之前的分镜，如果不可用则默认选中第一个
+                        if (content.shots && content.shots.length > 0) {
+                          const savedShotIdx = parseInt(localStorage.getItem("zctools_selected_shot_" + projectId));
+                          const targetIdx = (savedShotIdx >= 0 && savedShotIdx < content.shots.length) ? savedShotIdx : 0;
+                          selectShot(targetIdx);
+                          changeGridSize(targetIdx);
+                        }
         // 清理该项目没有的数据（文案之外的数据，切换项目时用）
         if (clearIfEmpty) {
           if (!content.shots || content.shots.length === 0) {
@@ -267,14 +298,22 @@ async function switchProject(id) {
     state.currentProject = { project_id: id, project_name: '当前项目' };
   }
   if (state.currentProject) {
-    await loadProjectContent(id, true);
-  } else {
-    clearProjectContent();
-  }
-  // 切换项目后重置流水线显示
+      await loadProjectContent(id, true);
+    } else {
+              clearProjectContent();
+            }
+            // 同步所有项目选择器
+                        const sel = document.getElementById("projectSelector");
+                        if (sel) sel.value = id || "";
+                        const ps = document.getElementById("psChars");
+                        if (ps) ps.value = id || "";
+                        const pss = document.getElementById("psSettings");
+                        if (pss) pss.value = id || "";
+            // 切换项目后重置流水线显示
     resetPipelineDisplay();
-    await loadPipelineRuns();
-    await loadCharacters();
+        await loadPipelineRuns();
+        await loadCharacters();
+        await loadScenes();
   // 如果该项目有正在执行的流水线，显示其当前状态
   const runningRun = state.pipelineRuns.find((r) => r.status === "running");
   if (runningRun) {
@@ -295,6 +334,12 @@ async function createProject() {
   await api("/projects", { body: { project_name: name } });
   closeModal("newProjectModal");
   await loadProjects();
+  // 自动选中新建的项目
+  const proj = state.projects.find((p) => p.project_name === name);
+  if (proj) {
+    document.getElementById("projectSelector").value = proj.project_id;
+    await switchProject(proj.project_id);
+  }
 }
 
 async function deleteCurrentProject() {
@@ -328,8 +373,8 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".tab-content").forEach((c) => c.classList.toggle("active", c.id === "tab-" + name));
   if (name === "pipeline") loadPipelineRuns();
-    if (name === "settings") { loadLLMConfig(); loadCharacters(); }
-    if (name === "script") loadPrompts();
+    if (name === "settings") { loadLLMConfig(); loadCharacters(); loadScenes(); restoreVideoModel(); }
+        if (name === "script") loadPrompts();
 }
 
 // ========== 分镜分析 + SRT ==========
@@ -389,40 +434,43 @@ function renderShots(shots) {
         let framePrompt = "";
         let frameFull = "";
         if (i === 0 && s.first_frame_prompt) {
-          frameFull = s.first_frame_prompt;
-          framePrompt = "🖼首 " + (frameFull.length > 25 ? frameFull.slice(0, 25) + "..." : frameFull);
+        frameFull = s.first_frame_prompt;
+        framePrompt = '<span class="frame-tag">首帧</span>' + (frameFull.length > 25 ? frameFull.slice(0, 25) + "..." : frameFull);
         }
         // 尾帧prompt：每个分镜都显示
         let lastPrompt = "";
         let lastFull = "";
         if (s.last_frame_prompt) {
-          lastFull = s.last_frame_prompt;
-          lastPrompt = "🖼尾 " + (lastFull.length > 25 ? lastFull.slice(0, 25) + "..." : lastFull);
+        lastFull = s.last_frame_prompt;
+        lastPrompt = '<span class="frame-tag">尾帧</span>' + (lastFull.length > 25 ? lastFull.slice(0, 25) + "..." : lastFull);
         }
         return `
-        <div class="shot-card" data-idx="${i}" onclick="selectShot(${i})">
-          <div class="shot-num">${i + 1}</div>
-          <div class="shot-body">
-            <div class="shot-scene">${s.scene || s.prompt || ""}</div>
-            <div class="shot-prompt">${s.prompt ? "🎨 " + (s.prompt.length > 40 ? s.prompt.slice(0, 40) + "..." : s.prompt) : ""}</div>
-            ${framePrompt ? `<div class="shot-frame-prompt">${framePrompt}${frameFull.length > 25 ? `<span class="frame-view-btn" onclick="event.stopPropagation();showPromptPopup('首帧', '${escapeStr(frameFull)}')">查看全部</span>` : ""}</div>` : ""}
-            ${lastPrompt ? `<div class="shot-frame-prompt">${lastPrompt}${lastFull.length > 25 ? `<span class="frame-view-btn" onclick="event.stopPropagation();showPromptPopup('尾帧', '${escapeStr(lastFull)}')">查看全部</span>` : ""}</div>` : ""}
-            <div class="shot-duration">⏱ ${s.duration || 3}秒</div>
-          </div>
-        </div>
-      `;
+                <div class="shot-card" data-idx="${i}" onclick="selectShot(${i})">
+                  <div class="shot-num">${i + 1}</div>
+                  <div class="shot-body">
+                    <div class="shot-scene">${s.scene || s.prompt || ""}</div>
+                    <div class="shot-prompt">${s.prompt ? "🎨 " + (s.prompt.length > 40 ? s.prompt.slice(0, 40) + "..." : s.prompt) : ""}</div>
+                    ${framePrompt ? `<div class="shot-frame-prompt">${framePrompt}${frameFull.length > 25 ? `<span class="frame-view-btn" onclick="event.stopPropagation();showPromptPopup('首帧', '${escapeStr(frameFull)}', ${i}, 'first_frame_prompt')">查看全部</span>` : ""}</div>` : ""}
+                                ${lastPrompt ? `<div class="shot-frame-prompt">${lastPrompt}${lastFull.length > 25 ? `<span class="frame-view-btn" onclick="event.stopPropagation();showPromptPopup('尾帧', '${escapeStr(lastFull)}', ${i}, 'last_frame_prompt')">查看全部</span>` : ""}</div>` : ""}
+                                                                <div class="shot-duration">⏱ ${s.duration || 3}秒</div>
+                                                  </div>
+                                                </div>
+                                              `;
       }).join("");
-  // 默认选中第一个
-    selectShot(0);
-  }
+        // 选中之前的分镜，如果不可用则默认选中第一个
+                const pid = state.currentProject ? state.currentProject.project_id : "_default";
+                const savedShotIdx = parseInt(localStorage.getItem("zctools_selected_shot_" + pid));
+                const targetIdx = (savedShotIdx >= 0 && savedShotIdx < shots.length) ? savedShotIdx : 0;
+                selectShot(targetIdx);
+      }
 
 // 转义特殊字符，防止 HTML/JS 注入
 function escapeStr(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '\\x27').replace(/"/g, '&quot;');
 }
 
-// 非阻塞浮层：显示完整 prompt 文本
-function showPromptPopup(type, text) {
+// 可编辑提示词弹窗：显示完整 prompt 文本并支持修改保存
+function showPromptPopup(type, text, shotIdx, fieldName) {
   // 移除已有的浮层
   var old = document.getElementById("promptPopup");
   if (old) old.remove();
@@ -430,16 +478,68 @@ function showPromptPopup(type, text) {
   var popup = document.createElement("div");
   popup.id = "promptPopup";
   popup.className = "prompt-popup";
+
+  var title = type + '完整提示词';
+  var displayText = text || '';
+
   popup.innerHTML =
-    '<div class="prompt-popup-header"><span class="prompt-popup-title">' + type + '完整提示词</span><span class="prompt-popup-close" onclick="closePromptPopup()">✕</span></div>' +
-    '<div class="prompt-popup-body">' + escapeStr(text) + '</div>';
+    '<div class="prompt-popup-header">' +
+      '<span class="prompt-popup-title">' + title + '</span>' +
+      '<span class="prompt-popup-close" onclick="closePromptPopup()">✕</span>' +
+    '</div>' +
+    '<div class="prompt-popup-body">' +
+      '<textarea class="prompt-popup-editor" id="promptEditor">' + escapeStr(displayText) + '</textarea>' +
+    '</div>' +
+    '<div class="prompt-popup-footer">' +
+      '<button class="btn btn-sm btn-outline" onclick="closePromptPopup()">取消</button>' +
+      '<button class="btn btn-sm btn-primary" onclick="savePromptEdit(' + shotIdx + ',\'' + fieldName + '\')">💾 保存</button>' +
+    '</div>';
 
   document.body.appendChild(popup);
+
+  // 自动聚焦并选中文本
+  setTimeout(function() {
+    var editor = document.getElementById("promptEditor");
+    if (editor) { editor.focus(); editor.select(); }
+  }, 100);
 
   // 点击外部关闭
   setTimeout(function() {
     document.addEventListener("click", closePromptPopupOutside, false);
   }, 10);
+}
+
+function savePromptEdit(shotIdx, fieldName) {
+  var editor = document.getElementById("promptEditor");
+  if (!editor) return;
+  var newText = editor.value.trim();
+
+  // 更新 state
+  if (state.currentShots && state.currentShots[shotIdx]) {
+    state.currentShots[shotIdx][fieldName] = newText;
+  }
+
+  // 更新 localStorage
+  var key = fieldName === 'first_frame_prompt' ? 'first_frame_prompt' : 'last_frame_prompt';
+  try {
+    var saved = JSON.parse(localStorage.getItem("zctools_shots_data") || "[]");
+    if (saved[shotIdx]) {
+      saved[shotIdx][fieldName] = newText;
+      localStorage.setItem("zctools_shots_data", JSON.stringify(saved));
+      localStorage.setItem("zctools_shots", JSON.stringify(saved));
+    }
+  } catch(e) {}
+
+  // 重新渲染分镜卡片
+  renderShots(state.currentShots);
+
+  // 重新选中当前分镜
+  selectShot(shotIdx);
+
+  // 保存到后端
+  if (state.currentProject) saveProjectContent();
+
+  closePromptPopup();
 }
 
 function closePromptPopup() {
@@ -510,10 +610,28 @@ function selectShot(idx) {
   if (card) card.classList.add("selected");
 
   state.selectedShotIdx = idx;
-  const shot = state.currentShots && state.currentShots[idx];
-  if (!shot) return;
+    // 持久化选中的分镜索引，按项目隔离
+    const pid = state.currentProject ? state.currentProject.project_id : "_default";
+    localStorage.setItem("zctools_selected_shot_" + pid, idx);
+    const shot = state.currentShots && state.currentShots[idx];
+    if (!shot) return;
 
-  // 从 localStorage 加载该分镜的图片/视频数据
+    // 切换分镜时，根据该分镜的生成状态更新按钮
+        const gen = state.shotGenerating[idx] || {};
+        const firstBtn = document.getElementById("genFirstBtn");
+        const lastBtn = document.getElementById("genLastBtn");
+        if (gen.first) {
+          firstBtn.disabled = true; firstBtn.textContent = "⏳";
+        } else {
+          firstBtn.disabled = false; firstBtn.textContent = "🖼";
+        }
+        if (gen.last) {
+          lastBtn.disabled = true; lastBtn.textContent = "⏳";
+        } else {
+          lastBtn.disabled = false; lastBtn.textContent = "🖼";
+        }
+
+        // 从 localStorage 加载该分镜的图片/视频数据
   const shotData = loadShotData(idx);
   const prevShotData = idx > 0 ? loadShotData(idx - 1) : null;
 
@@ -542,39 +660,56 @@ function selectShot(idx) {
     }
 
     const firstFrameSrc = ownFirstFrame || inheritedUrl;
-    if (firstFrameSrc) {
-      if (firstFrameSrc.startsWith("data:")) {
-        firstImg.innerHTML = `<img src="${firstFrameSrc}" class="frame-img" alt="首帧">` + (isInherited ? '<div class="inherited-badge">⬆ 继承</div>' : '');
-      } else if (firstFrameSrc.startsWith("http")) {
-        firstImg.innerHTML = `<img src="/api/image-proxy?url=${encodeURIComponent(firstFrameSrc)}" class="frame-img" alt="首帧">` + (isInherited ? '<div class="inherited-badge">⬆ 继承</div>' : '');
-      } else {
-        firstImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
-      }
-    } else {
-      firstImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
-    }
+        if (firstFrameSrc) {
+          if (firstFrameSrc.startsWith("data:")) {
+            firstImg.innerHTML = `<img src="${firstFrameSrc}" class="frame-img" alt="首帧">` + (isInherited ? '<div class="inherited-badge">⬆ 继承</div>' : '');
+          } else if (firstFrameSrc.startsWith("http")) {
+            firstImg.innerHTML = `<img src="/api/image-proxy?url=${encodeURIComponent(firstFrameSrc)}" class="frame-img" alt="首帧">` + (isInherited ? '<div class="inherited-badge">⬆ 继承</div>' : '');
+          } else {
+            firstImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
+          }
+        } else {
+          // 检查是否正在生成中
+          const gen = state.shotGenerating[idx] || {};
+          if (gen.first) {
+            firstImg.innerHTML = '<div class="frame-generating"><span class="gen-text">生成中...</span></div>';
+          } else {
+            firstImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
+          }
+        }
 
   // === 尾帧 ===
-  const lastImg = document.getElementById("lastFrameImage");
-  lastImg.dataset.shotIdx = idx;
-  const ownLastFrame = shotData.lastFrame || shotData.lastFrameUploaded;
-  if (ownLastFrame && ownLastFrame.startsWith("data:")) {
-    lastImg.innerHTML = `<img src="${ownLastFrame}" class="frame-img" alt="尾帧">`;
-  } else if (ownLastFrame && ownLastFrame.startsWith("http")) {
-    lastImg.innerHTML = `<img src="/api/image-proxy?url=${encodeURIComponent(ownLastFrame)}" class="frame-img" alt="尾帧">`;
-  } else if (ownLastFrame) {
-    lastImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
-  } else {
-    lastImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
-  }
+    const lastImg = document.getElementById("lastFrameImage");
+    lastImg.dataset.shotIdx = idx;
+    const ownLastFrame = shotData.lastFrame || shotData.lastFrameUploaded;
+    if (ownLastFrame && ownLastFrame.startsWith("data:")) {
+      lastImg.innerHTML = `<img src="${ownLastFrame}" class="frame-img" alt="尾帧">`;
+    } else if (ownLastFrame && ownLastFrame.startsWith("http")) {
+      lastImg.innerHTML = `<img src="/api/image-proxy?url=${encodeURIComponent(ownLastFrame)}" class="frame-img" alt="尾帧">`;
+    } else if (ownLastFrame) {
+      lastImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
+    } else {
+      // 检查是否正在生成中
+      const gen = state.shotGenerating[idx] || {};
+      if (gen.last) {
+        lastImg.innerHTML = '<div class="frame-generating"><span class="gen-text">生成中...</span></div>';
+      } else {
+        lastImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
+      }
+    }
 
-  // === 视频 ===
-  const videoPreview = document.getElementById("shotVideoPreview");
-  if (shotData.video) {
-    videoPreview.innerHTML = `<video src="${shotData.video}" class="shot-video" controls></video>`;
-  } else {
-    videoPreview.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
-  }
+  // === 视频（预加载 + 缓存，切换不重新加载） ===
+    const videoPreview = document.getElementById("shotVideoPreview");
+    if (shotData.video) {
+      const existing = videoPreview.querySelector("video");
+      if (existing && existing.dataset.src === shotData.video) {
+        // 同一个视频，不重新加载
+      } else {
+        videoPreview.innerHTML = `<video src="${shotData.video}" class="shot-video" controls data-src="${shotData.video}" preload="auto"></video>`;
+      }
+    } else {
+      videoPreview.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
+    }
 
   // 更新九宫格（显示当前分镜的图片）
   changeGridSize(idx);
@@ -626,69 +761,315 @@ function saveShotData(idx, data) {
   } catch {}
 }
 
-function genFirstFrame() {
-  if (!requireProject()) return;
-  const idx = parseInt(document.getElementById("firstFrameImage").dataset.shotIdx);
-  if (isNaN(idx)) { alert("请先选择一个分镜"); return; }
-  const shot = state.currentShots && state.currentShots[idx];
-  if (!shot) { alert("分镜数据不存在"); return; }
-
-  // 首帧用 first_frame_prompt，降级到通用 prompt
-  const prompt = shot.first_frame_prompt || shot.enhanced_prompt || shot.prompt || shot.scene || "";
-  if (!prompt) { alert("该分镜无 prompt"); return; }
-
-  const btn = document.getElementById("genFirstBtn");
-  btn.disabled = true; btn.textContent = "⏳";
-
-  api("/generate-frame", {
-        body: { prompt: prompt, aspect_ratio: "16:9", mode: "first_frame", project_id: state.currentProject ? state.currentProject.project_id : "", shot_idx: idx }
-      }).then(res => {
-        if (res.success && res.image_url) {
-                  saveShotData(idx, { firstFrame: res.image_url, firstFrameUploaded: "", firstFrameApiUrl: res.image_url });
-                  selectShot(idx);
-                  btn.disabled = false; btn.textContent = "🖼";
-              } else {
-                  var errMsg = typeof res.error === 'string' ? res.error : JSON.stringify(res.error || "未知错误");
-                  alert("首帧生成失败: " + errMsg);
-                  btn.disabled = false; btn.textContent = "🖼";
-                }
-              }).catch(e => {
-        alert("首帧生成失败: " + e.message);
-        btn.disabled = false; btn.textContent = "🖼";
-      });
-    }
-
-    function genLastFrame() {
-  if (!requireProject()) return;
-  const idx = parseInt(document.getElementById("lastFrameImage").dataset.shotIdx);
-  if (isNaN(idx)) { alert("请先选择一个分镜"); return; }
-  const shot = state.currentShots && state.currentShots[idx];
-  if (!shot) { alert("分镜数据不存在"); return; }
-
-  const prompt = shot.enhanced_prompt || shot.prompt || shot.scene || "";
-  if (!prompt) { alert("该分镜无 prompt"); return; }
-
-  const btn = document.getElementById("genLastBtn");
-  btn.disabled = true; btn.textContent = "⏳";
-
-  api("/generate-frame", {
-        body: { prompt: prompt + ", end frame, concluding scene", aspect_ratio: "16:9", mode: "last_frame", project_id: state.currentProject ? state.currentProject.project_id : "", shot_idx: idx }
-      }).then(res => {
-        if (res.success && res.image_url) {
-          saveShotData(idx, { lastFrame: res.image_url, lastFrameUploaded: "", lastFrameApiUrl: res.image_url });
-          selectShot(idx);
-          btn.disabled = false; btn.textContent = "🖼";
-        } else {
-        alert("尾帧生成失败: " + (typeof res.error === 'string' ? res.error : JSON.stringify(res.error || "未知错误")));
-        btn.disabled = false; btn.textContent = "🖼";
-      }
-    }).catch(e => {
-    alert("尾帧生成失败: " + e.message);
-    btn.disabled = false; btn.textContent = "🖼";
-  });
+// 将分镜的首帧/尾帧占位改为"生成中..."渲染效果
+function setFrameGenerating(elId, idx) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.dataset.shotIdx = idx;
+  el.innerHTML = '<div class="frame-generating"><span class="gen-text">生成中...</span></div>';
 }
 
-function genShotVideo() {
+// 持久化生成中状态到 localStorage，按项目隔离
+function persistShotGenerating() {
+  const pid = state.currentProject ? state.currentProject.project_id : "_default";
+  localStorage.setItem("zctools_shot_generating_" + pid, JSON.stringify(state.shotGenerating));
+}
+
+function genFirstFrame(idx) {
+  if (!requireProject()) return;
+  if (idx === undefined) idx = state.selectedShotIdx;
+  if (idx === undefined || idx === null) { alert("请先选择一个分镜"); return; }
+  const shot = state.currentShots && state.currentShots[idx];
+  if (!shot) { alert("分镜数据不存在"); return; }
+
+  // 如果该分镜正在生成中，不允许重复点击
+    if (state.shotGenerating[idx] && state.shotGenerating[idx].first) return;
+
+    // 首帧用 first_frame_prompt，降级到通用 prompt
+    const prompt = shot.first_frame_prompt || shot.enhanced_prompt || shot.prompt || shot.scene || "";
+    if (!prompt) { alert("该分镜无 prompt"); return; }
+
+    // 标记该分镜首帧正在生成
+    if (!state.shotGenerating[idx]) state.shotGenerating[idx] = {};
+    state.shotGenerating[idx].first = true;
+    // 仅非批量模式（有选中分镜且是当前分镜）时更新按钮
+    const isSingle = idx === state.selectedShotIdx;
+    if (isSingle) {
+      const btn = document.getElementById("genFirstBtn");
+      btn.disabled = true; btn.textContent = "⏳";
+    }
+    // 占位文字改为"生成中..."
+    setFrameGenerating("firstFrameImage", idx);
+    persistShotGenerating();
+
+  api("/generate-frame", {
+            body: { prompt: prompt, aspect_ratio: "16:9", mode: "first_frame", project_id: state.currentProject ? state.currentProject.project_id : "", shot_idx: idx }
+          }).then(res => {
+                      if (window._batchCancelled) return;
+                      if (res.success && res.image_url) {
+                                saveShotData(idx, { firstFrame: res.image_url, firstFrameUploaded: "", firstFrameApiUrl: res.image_url });
+                      // 直接渲染首帧图片
+                      const firstImg = document.getElementById("firstFrameImage");
+                      if (firstImg) {
+                        firstImg.dataset.shotIdx = idx;
+                        if (res.image_url.startsWith("data:")) {
+                          firstImg.innerHTML = '<img src="' + res.image_url + '" class="frame-img" alt="首帧">';
+                        } else {
+                          firstImg.innerHTML = '<img src="/api/image-proxy?url=' + encodeURIComponent(res.image_url) + '" class="frame-img" alt="首帧">';
+                        }
+                      }
+                      selectShot(idx);
+                                            if (isSingle) {
+                                              btn.disabled = false; btn.textContent = "🖼";
+                                            }
+                                            // 保存到后端
+                                            if (state.currentProject) saveProjectContent();
+                                        } else {
+                                          var errMsg = typeof res.error === 'string' ? res.error : JSON.stringify(res.error || "未知错误");
+                                          alert("首帧生成失败: " + errMsg);
+                                          if (isSingle) {
+                                            btn.disabled = false; btn.textContent = "🖼";
+                                          }
+                                        }
+                                        // 清除生成状态
+                                                          if (state.shotGenerating[idx]) state.shotGenerating[idx].first = false;
+                                                          persistShotGenerating();
+                                                        }).catch(e => {
+                                                                      if (window._batchCancelled) return;
+                                                                      alert("首帧生成失败: " + e.message);
+                                                  if (isSingle) {
+                                                    btn.disabled = false; btn.textContent = "🖼";
+                                                  }
+                                                  if (state.shotGenerating[idx]) state.shotGenerating[idx].first = false;
+                                                  persistShotGenerating();
+                              });
+                            }
+
+                            function genLastFrame(idx) {
+                              if (!requireProject()) return;
+                              if (idx === undefined) idx = state.selectedShotIdx;
+                              if (idx === undefined || idx === null) { alert("请先选择一个分镜"); return; }
+                              const shot = state.currentShots && state.currentShots[idx];
+                              if (!shot) { alert("分镜数据不存在"); return; }
+
+                              // 如果该分镜正在生成中，不允许重复点击
+                                      if (state.shotGenerating[idx] && state.shotGenerating[idx].last) return;
+
+                                      const prompt = shot.last_frame_prompt || shot.enhanced_prompt || shot.prompt || shot.scene || "";
+                                      if (!prompt) { alert("该分镜无 prompt"); return; }
+
+                                      // 标记该分镜尾帧正在生成
+                                      if (!state.shotGenerating[idx]) state.shotGenerating[idx] = {};
+                                      state.shotGenerating[idx].last = true;
+                                      // 仅非批量模式时更新按钮
+                                      const isSingle = idx === state.selectedShotIdx;
+                                      if (isSingle) {
+                                        const btn = document.getElementById("genLastBtn");
+                                        btn.disabled = true; btn.textContent = "⏳";
+                                      }
+                                      // 占位文字改为"生成中..."
+                                                      setFrameGenerating("lastFrameImage", idx);
+                                                      persistShotGenerating();
+
+                        api("/generate-frame", {
+                        body: { prompt: prompt, aspect_ratio: "16:9", mode: "last_frame", project_id: state.currentProject ? state.currentProject.project_id : "", shot_idx: idx }
+                      }).then(res => {
+                                              if (window._batchCancelled) return;
+                                              if (res.success && res.image_url) {
+                                                saveShotData(idx, { lastFrame: res.image_url, lastFrameUploaded: "", lastFrameApiUrl: res.image_url });
+                          // 直接渲染尾帧图片（不依赖 selectShot）
+                          const lastImg = document.getElementById("lastFrameImage");
+                          if (lastImg) {
+                            lastImg.dataset.shotIdx = idx;
+                            if (res.image_url.startsWith("data:")) {
+                              lastImg.innerHTML = '<img src="' + res.image_url + '" class="frame-img" alt="尾帧">';
+                            } else {
+                              lastImg.innerHTML = '<img src="/api/image-proxy?url=' + encodeURIComponent(res.image_url) + '" class="frame-img" alt="尾帧">';
+                            }
+                          }
+                          selectShot(idx);
+                                                    if (isSingle) {
+                                                      btn.disabled = false; btn.textContent = "🖼";
+                                                    }
+                                                    // 保存到后端
+                                                    if (state.currentProject) saveProjectContent();
+                                                  } else {
+                                        alert("尾帧生成失败: " + (typeof res.error === 'string' ? res.error : JSON.stringify(res.error || "未知错误")));
+                                        if (isSingle) {
+                                          btn.disabled = false; btn.textContent = "🖼";
+                                        }
+                                      }
+                                      // 清除生成状态
+                                                  if (state.shotGenerating[idx]) state.shotGenerating[idx].last = false;
+                                                  persistShotGenerating();
+                                                }).catch(e => {
+                                                                                                if (window._batchCancelled) return;
+                                                                                                alert("尾帧生成失败: " + e.message);
+                                                if (isSingle) {
+                                                  btn.disabled = false; btn.textContent = "🖼";
+                                                }
+                      if (state.shotGenerating[idx]) state.shotGenerating[idx].last = false;
+                      persistShotGenerating();
+        });
+      }
+
+// ========== 批量生成所有分镜的首帧 + 尾帧（同步提交，一起等待） ==========
+async function batchGenFrames() {
+  if (!requireProject()) return;
+  const shots = state.currentShots;
+  if (!shots || shots.length === 0) { alert("没有分镜数据"); return; }
+
+  window._batchCancelled = false;
+  document.getElementById("cancelBatchBtn").style.display = "inline-block";
+
+  const btn = document.getElementById("batchGenBtn");
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = "⏳ 提交中...";
+
+  // 第一步：收集所有需要生成的请求（跳过已生成的）
+  const tasks = [];
+  for (let i = 0; i < shots.length; i++) {
+    const shot = shots[i];
+    const shotData = loadShotData(i);
+    // 首帧（仅第一个分镜需要首帧）
+        if (i === 0 && !shotData.firstFrame && !shotData.firstFrameUploaded) {
+      const p = shot.first_frame_prompt || shot.enhanced_prompt || shot.prompt || shot.scene || "";
+      if (p) tasks.push({ idx: i, type: "first", prompt: p });
+    }
+    // 尾帧
+    if (!shotData.lastFrame && !shotData.lastFrameUploaded) {
+      const p = shot.last_frame_prompt || shot.enhanced_prompt || shot.prompt || shot.scene || "";
+      if (p) tasks.push({ idx: i, type: "last", prompt: p });
+    }
+  }
+
+  if (tasks.length === 0) {
+    alert("所有图片已生成，无需批量生成");
+    btn.disabled = false;
+    btn.textContent = originalText;
+    return;
+  }
+
+  btn.textContent = `⏳ 批量提交 ${tasks.length} 张...`;
+
+  // 更新占位文字为"生成中..."
+    for (const t of tasks) {
+      const elId = t.type === "first" ? "firstFrameImage" : "lastFrameImage";
+      setFrameGenerating(elId, t.idx);
+    }
+  // 如果当前选中的分镜在任务列表里，更新按钮状态
+  if (state.selectedShotIdx !== null) {
+    const gen = state.shotGenerating[state.selectedShotIdx] || {};
+    const firstBtn = document.getElementById("genFirstBtn");
+    const lastBtn = document.getElementById("genLastBtn");
+    if (gen.first) { firstBtn.disabled = true; firstBtn.textContent = "⏳"; }
+    if (gen.last) { lastBtn.disabled = true; lastBtn.textContent = "⏳"; }
+  }
+
+  // 第二步：同步提交所有请求 — 模拟点击各个按钮
+    // 先收集所有任务（已在上一步完成），然后逐个调用 genFirstFrame/genLastFrame
+    // 但这两个函数返回的是 Promise（.then 链），需要用 Promise.allSettled 等待
+    // 注意：genFirstFrame/genLastFrame 内部会处理 shotGenerating 状态和 DOM 渲染
+    const results = await Promise.allSettled(
+      tasks.map(t =>
+        t.type === "first"
+          ? new Promise(resolve => {
+                        genFirstFrame(t.idx);
+              // 轮询等待该任务完成（shotGenerating[t.idx].first 变回 false）
+              const check = setInterval(() => {
+                if (state.shotGenerating[t.idx] && !state.shotGenerating[t.idx].first) {
+                  clearInterval(check);
+                  resolve({ status: "fulfilled" });
+                }
+              }, 200);
+              setTimeout(() => { clearInterval(check); resolve({ status: "fulfilled" }); }, 60000);
+            })
+          : new Promise(resolve => {
+              genLastFrame(t.idx);
+              const check = setInterval(() => {
+                if (state.shotGenerating[t.idx] && !state.shotGenerating[t.idx].last) {
+                  clearInterval(check);
+                  resolve({ status: "fulfilled" });
+                }
+              }, 200);
+              setTimeout(() => { clearInterval(check); resolve({ status: "fulfilled" }); }, 60000);
+            })
+      )
+    );
+
+    // 第三步：统计结果
+    let success = 0;
+    let fail = 0;
+    for (let i = 0; i < tasks.length; i++) {
+      const r = results[i];
+      if (r.status === "fulfilled") {
+        success++;
+      } else {
+        fail++;
+      }
+    }
+
+  // 刷新显示
+      if (state.selectedShotIdx !== null) selectShot(state.selectedShotIdx);
+      if (state.currentProject) await saveProjectContent();
+
+      btn.disabled = false;
+          btn.textContent = originalText;
+          document.getElementById("cancelBatchBtn").style.display = "none";
+              window._batchCancelled = false;
+              alert(`批量生成完成！成功 ${success} 张，失败 ${fail} 张`);
+          }
+
+          /**
+           * 一键暂停批量生成 — 释放 shotGenerating 锁，重置所有占位文字
+           */
+          function cancelBatchFrames() {
+            window._batchCancelled = true;
+
+            // 清空所有生成状态，释放锁
+            for (const idx in state.shotGenerating) {
+              state.shotGenerating[idx] = {};
+            }
+            persistShotGenerating();
+
+            // 重置所有分镜的占位文字为"待生成"
+            for (let i = 0; i < (state.currentShots || []).length; i++) {
+              const firstImg = document.getElementById("firstFrameImage");
+              if (firstImg && parseInt(firstImg.dataset.shotIdx) === i) {
+                const gen = state.shotGenerating[i] || {};
+                if (!gen.first) {
+                  firstImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
+                }
+              }
+              const lastImg = document.getElementById("lastFrameImage");
+              if (lastImg && parseInt(lastImg.dataset.shotIdx) === i) {
+                const gen = state.shotGenerating[i] || {};
+                if (!gen.last) {
+                  lastImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
+                }
+              }
+            }
+
+            // 释放按钮
+            if (state.selectedShotIdx !== null) {
+              const gen = state.shotGenerating[state.selectedShotIdx] || {};
+              const firstBtn = document.getElementById("genFirstBtn");
+              const lastBtn = document.getElementById("genLastBtn");
+              if (!gen.first) { firstBtn.disabled = false; firstBtn.textContent = "🖼"; }
+              if (!gen.last) { lastBtn.disabled = false; lastBtn.textContent = "🖼"; }
+            }
+
+            // 恢复批量生成按钮
+            const batchBtn = document.getElementById("batchGenBtn");
+            batchBtn.disabled = false;
+            batchBtn.textContent = "🖼 批量生成所有图片";
+            document.getElementById("cancelBatchBtn").style.display = "none";
+
+            alert("已暂停批量生成");
+          }
+
+          function genShotVideo() {
   if (!requireProject()) return;
   const idx = state.selectedShotIdx;
   if (idx === undefined || idx === null) { alert("请先选择一个分镜"); return; }
@@ -715,7 +1096,7 @@ function genShotVideo() {
         prompt: prompt,
         first_frame: firstFrame || "",
         last_frame: lastFrame || "",
-        model: "Pixverse-V6.0",
+        model: getVideoModel(),
         ratio: "16:9",
         resolution: "360p",
         duration: shot.duration || 5,
@@ -723,11 +1104,13 @@ function genShotVideo() {
         shot_idx: idx,
       },
   }).then(res => {
-    if (res.success && res.video_url) {
-      saveShotData(idx, { video: res.video_url });
-      selectShot(idx);
-      btn.disabled = false; btn.textContent = "🎬 生成视频";
-    } else {
+      if (res.success && res.video_url) {
+        saveShotData(idx, { video: res.video_url });
+        selectShot(idx);
+        btn.disabled = false; btn.textContent = "🎬 生成视频";
+        // 保存到后端
+        if (state.currentProject) saveProjectContent();
+      } else {
       alert("视频生成失败: " + (typeof res.error === 'string' ? res.error : JSON.stringify(res.error || "未知错误")));
       btn.disabled = false; btn.textContent = "🎬 生成视频";
     }
@@ -1094,11 +1477,20 @@ async function showPipelineRunDetail(runId) {
 function statusIcon(status) { return { idle: "⏸", running: "🔄", completed: "✅", error: "❌" }[status] || "⏳"; }
 function formatTime(iso) { if (!iso) return ""; const d = new Date(iso); return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
 
+// ========== 字数统计 ==========
+function updateCharCount() {
+  const el = document.getElementById("charCount");
+  if (!el) return;
+  const text = document.getElementById("storyInput").value;
+  const count = text.replace(/\s/g, "").length;
+  el.textContent = count + " 字";
+}
+
 // ========== AI 生成文案 ==========
 async function generateScript() {
   if (!requireProject()) return;
   const topic = document.getElementById("scriptTopic").value.trim();
-  if (!topic) { alert("请先输入视频主题"); return; }
+  if (!topic) { alert("请先输入文案主题"); return; }
   const btn = document.getElementById("genScriptBtn");
   const tone = document.getElementById("scriptTone").value;
   const wordCountRaw = document.getElementById("scriptWordCount").value.trim();
@@ -1108,9 +1500,10 @@ async function generateScript() {
   try {
     const result = await api("/script/generate", { body: { topic, style: "", tone, duration_seconds: 30, word_count: wordCount, system_prompt_id: promptId } });
     if (result.generated && result.script) {
-              document.getElementById("storyInput").value = result.script;
-              localStorage.setItem("zctools_script", result.script);
-              // 保存到后端，确保分镜/流水线能读到
+                  document.getElementById("storyInput").value = result.script;
+                  localStorage.setItem("zctools_script", result.script);
+                  updateCharCount();
+                  // 保存到后端，确保分镜/流水线能读到
               if (state.currentProject) await saveProjectContent();
               // 自动标记流水线步骤2（文案生成）为已完成
               markPipelineStep(2, "completed");
@@ -1131,9 +1524,10 @@ async function modifyScript() {
   try {
     const result = await api("/script/modify", { body: { topic: currentScript, custom_prompt: instruction } });
     if (result.modified && result.script) {
-          document.getElementById("storyInput").value = result.script;
-          localStorage.setItem("zctools_script", result.script);
-          // 保存到后端
+              document.getElementById("storyInput").value = result.script;
+              localStorage.setItem("zctools_script", result.script);
+              updateCharCount();
+              // 保存到后端
           if (state.currentProject) await saveProjectContent();
         }
     else alert("修改失败: " + (result.error || "未知错误"));
@@ -1229,14 +1623,88 @@ async function deleteCustomPrompt(id) {
 }
 
 // ========== LLM 设置 ==========
+function selectModel(model) {
+  document.getElementById("llmModel").value = model;
+  document.getElementById("modelListDropdown").style.display = "none";
+}
+
 async function loadLLMConfig() {
   try {
     const config = await api("/llm/config");
     document.getElementById("llmBaseUrl").value = config.base_url || "";
     document.getElementById("llmModel").value = config.model || "";
     document.getElementById("llmKeyStatus").textContent = config.has_key ? "🔑 已配置" : "❌ 未配置";
-    document.getElementById("llmConfigInfo").innerHTML = config.has_key ? `状态：已配置 ✅ | Key: ${config.key_preview}` : "状态：未配置 ❌ 请先填写 API 地址和 Key，然后测试连接";
-  } catch (e) { document.getElementById("llmConfigInfo").textContent = "加载失败: " + e.message; }
+    document.getElementById("llmConfigInfo").innerHTML = config.has_key ? `状态：已配置 ✅ | 共 ${config.key_count} 个 Key` : "状态：未配置 ❌ 请先填写 API 地址和 Key，然后测试连接";
+      } catch (e) { document.getElementById("llmConfigInfo").textContent = "加载失败: " + e.message; }
+      // 同时加载 key 列表
+      setTimeout(loadLLMKeys, 100);
+}
+
+async function loadLLMKeys() {
+  try {
+    const data = await api("/llm/keys");
+    const list = document.getElementById("llmKeyList");
+    if (!list) return;
+    if (!data.keys || data.keys.length === 0) {
+      list.innerHTML = '<div class="settings-info" style="margin-top:4px">暂无 API Key，请添加</div>';
+      return;
+    }
+    list.innerHTML = data.keys.map(k => `
+                  <div class="key-item ${k.is_active ? 'key-active' : ''}" onclick="selectLLMKey('${k.id}')" style="cursor:pointer">
+                                      <div class="key-col-left">
+                                        <span class="key-dot ${k.is_active ? 'dot-active' : (k.failed_at ? 'dot-dead' : 'dot-ok')}"></span>
+                                        <span class="key-label" onclick="event.stopPropagation();renameLLMKey('${k.id}','${k.label}')" title="点击重命名">${k.label}</span>
+                                      </div>
+                                      <div class="key-col-id">
+                                        <span class="key-id">#${k.id}</span>
+                                      </div>
+                                      <div class="key-col-model">
+                                        ${k.model ? `<span class="key-model">${k.model}</span>` : ''}
+                                      </div>
+                                      <div class="key-col-right">
+                                                            ${k.is_active ? '<span class="key-badge key-badge-active">当前</span>' : ''}
+                                                            ${k.failed_at ? '<span class="key-badge key-badge-dead">已挂</span>' : '<span class="key-badge key-badge-ok">正常</span>'}
+                                                            <span class="key-delete-btn" onclick="event.stopPropagation();deleteLLMKey('${k.id}')" title="删除">✕</span>
+                                                          </div>
+                                    </div>
+                `).join("");
+  } catch (e) { console.warn("加载 Key 列表失败:", e.message); }
+}
+
+async function addLLMKey() {
+  const input = document.getElementById("newKeyInput");
+  const key = input.value.trim();
+  if (!key) { alert("请输入 API Key"); return; }
+  try {
+    await api("/llm/keys", { body: { api_key: key } });
+    input.value = "";
+    loadLLMKeys();
+  } catch (e) { alert("添加失败: " + e.message); }
+}
+
+async function selectLLMKey(id) {
+  // 把选中的 key 设为当前活跃 key
+  try {
+    await api("/llm/keys/" + id + "/activate", { method: "POST" });
+    loadLLMKeys();
+  } catch (e) { alert("切换失败: " + e.message); }
+}
+
+async function renameLLMKey(id, currentLabel) {
+  const newLabel = prompt("重命名 Key：", currentLabel);
+  if (!newLabel || newLabel === currentLabel) return;
+  try {
+    await api("/llm/keys/" + id + "/rename", { method: "POST", body: { label: newLabel } });
+    loadLLMKeys();
+  } catch (e) { alert("重命名失败: " + e.message); }
+}
+
+async function deleteLLMKey(id) {
+  if (!confirm("确定删除这个 Key？")) return;
+  try {
+    await api("/llm/keys/" + id, { method: "DELETE" });
+    loadLLMKeys();
+  } catch (e) { alert("删除失败: " + e.message); }
 }
 
 async function fetchModels() {
@@ -1269,119 +1737,425 @@ async function fetchModels() {
 async function saveLLMConfig() {
   const baseUrl = document.getElementById("llmBaseUrl").value.trim();
   const model = document.getElementById("llmModel").value.trim();
-  const apiKey = document.getElementById("llmApiKey").value.trim();
+  const keyInput = document.getElementById("newKeyInput").value.trim();
   if (!baseUrl) { alert("请先填写 API 地址"); return; }
   if (!model) { alert("请先选择模型"); return; }
-  if (!apiKey) { alert("请先填写 API Key"); return; }
-  try {
-    const result = await api("/llm/config", { body: { base_url: baseUrl, model: model, api_key: apiKey } });
-    document.getElementById("llmKeyStatus").textContent = result.has_key ? "🔑 已配置" : "❌ 未配置";
-    document.getElementById("llmConfigInfo").innerHTML = result.has_key ? `状态：已配置 ✅ | Key: ${result.key_preview}` : "状态：未配置 ❌";
-    document.getElementById("llmApiKey").value = "";
-    if (result.configured) alert("✅ 配置已保存！现在可以生成文案了。");
-  } catch (e) { alert("保存失败: " + e.message); }
+  if (!keyInput) { alert("请先输入 API Key"); return; }
+    try {
+        // 先添加 key（带上当前选中的模型）
+        const curModel = document.getElementById("llmModel").value.trim();
+        await api("/llm/keys", { body: { api_key: keyInput, model: curModel } });
+        document.getElementById("newKeyInput").value = "";
+        // 再保存配置
+        const result = await api("/llm/config", { body: { base_url: baseUrl, model: model } });
+    document.getElementById("llmConfigInfo").innerHTML = result.configured ? `状态：已配置 ✅ | 共 ${result.key_count} 个 Key` : "状态：未配置 ❌";
+    loadLLMKeys();
+    if (result.configured) alert("✅ 已添加 Key 并保存配置！");
+  } catch (e) { alert("操作失败: " + e.message); }
 }
 
 async function testLLMConfig() {
   const baseUrl = document.getElementById("llmBaseUrl").value.trim();
-  const apiKey = document.getElementById("llmApiKey").value.trim();
+  const apiKey = document.getElementById("newKeyInput").value.trim();
   if (!baseUrl) { alert("请先填写 API 地址"); return; }
-  if (!apiKey) { alert("请先填写 API Key"); return; }
+  if (!apiKey) { alert("请先输入 API Key"); return; }
   const btn = document.querySelector(".settings-actions .btn-outline");
   const resultEl = document.getElementById("llmTestResult");
   btn.disabled = true; btn.textContent = "⏳ 测试中..."; resultEl.textContent = "";
   try {
-    const result = await api("/llm/test", { method: "POST", body: { base_url: baseUrl, api_key: apiKey } });
-    resultEl.innerHTML = result.ok ? `✅ 连接成功: "${result.reply}"` : "❌ 连接失败，请检查配置";
-    resultEl.className = result.ok ? "settings-test-result success" : "settings-test-result error";
-    // 测试成功后自动拉取模型列表
-    if (result.ok) {
-      fetchModels();
-    }
-  } catch (e) { resultEl.textContent = "❌ 测试失败: " + e.message; resultEl.className = "settings-test-result error"; }
-  finally { btn.disabled = false; btn.textContent = "📡 测试连接"; }
-}
+        const result = await api("/llm/test", { method: "POST", body: { base_url: baseUrl, api_key: apiKey } });
+        resultEl.innerHTML = result.ok ? `✅ 连接成功: "${result.reply}"` : "❌ 连接失败，请检查配置";
+        resultEl.className = result.ok ? "settings-test-result success" : "settings-test-result error";
+        if (result.ok) {
+          // 测试成功后拉取模型列表并显示为下拉选择
+          const modelsResult = await api("/llm/models?base_url=" + encodeURIComponent(baseUrl) + "&api_key=" + encodeURIComponent(document.getElementById("newKeyInput").value.trim()));
+          const dropdown = document.getElementById("modelListDropdown");
+          const modelInput = document.getElementById("llmModel");
+          if (modelsResult.models && modelsResult.models.length > 0) {
+            dropdown.innerHTML = modelsResult.models.map(m => `<div class="model-dropdown-item" onclick="selectModel('${m}')">${m}</div>`).join("");
+            dropdown.style.display = "block";
+          }
+        }
+    } catch (e) { resultEl.textContent = "❌ 测试失败: " + e.message; resultEl.className = "settings-test-result error"; }
+    finally { btn.disabled = false; btn.textContent = "📡 测试连接"; }
+  }
 
-// ========== 角色管理 ==========
-async function loadCharacters() {
-  if (!state.currentProject) return;
-  try {
+  // ========== 角色管理 ==========
+          async function loadCharacters() {
+                      const list = document.getElementById("charList");
+                      if (!list) return;
+                      // 同步设置页项目选择器
+                      _syncSettingsSelector();
+                      if (!state.currentProject) {
+              list.innerHTML = '<div class="settings-hint" style="padding:8px 0">请先选择项目</div>';
+              return;
+            }
+        try {
+          const chars = await api("/characters?project_id=" + state.currentProject.project_id);
+        if (!chars || chars.length === 0) {
+          list.innerHTML = '<div class="settings-hint" style="padding:8px 0">暂无角色，点击添加</div>';
+          return;
+        }
+      list.innerHTML = chars.map((c, ci) => `
+                                <div class="char-item" data-char-idx="${ci}">
+                                  <div class="char-cols">
+                                    <!-- 列一：填写信息生成三视图 -->
+                                    <div class="char-col">
+                                      <div class="char-col-title">✏️ 填写信息生成三视图 <button class="char-del-btn" onclick="deleteCharacter('${c.id}')" title="删除角色">弃</button></div>
+                                      <div class="char-gen-layout">
+                                        <div class="char-gen-fields">
+                                          <input class="char-field char-name-field" value="${escHtml(c.name === "新角色" ? "未命名" : c.name)}" placeholder="未命名" onchange="updateCharField('${c.id}','name',this.value)" onclick="this.select()" title="点击重命名">
+                                          <input class="char-field" value="${escHtml(c.style || "")}" placeholder="风格（如：古装侠客）" onchange="updateCharField('${c.id}','style',this.value)">
+                                          <input class="char-field" value="${escHtml((c.voice && c.voice.tone) || "")}" placeholder="个性（如：活泼）" onchange="updateCharField('${c.id}','personality',this.value)">
+                                          <button class="char-gen-btn" onclick="genThreeView('${c.id}')" id="gen3Btn_${c.id}">🖼 生成三视图</button>
+                                        </div>
+                                        <div class="char-gen-preview" id="charPreview_${c.id}">
+                                          ${c.three_view && c.three_view.images && c.three_view.images.length > 0
+                                            ? `<img src="/api/image-proxy?url=${encodeURIComponent(c.three_view.images[0])}" class="char-preview-img">`
+                                            : '<div class="char-preview-placeholder">生成后预览</div>'}
+                                        </div>
+                                      </div>
+                                    </div>
+                              <!-- 列二：上传图片 -->
+                              <div class="char-col">
+                                <div class="char-col-title">
+                                  📷 上传角色图片
+                                  ${c.uploaded_image ? `<span class="char-clear-btn" onclick="event.stopPropagation();clearUploadedImage('${c.id}')">清空</span>` : ""}
+                                </div>
+                                <div class="char-upload-box" onclick="uploadCharImage('${c.id}')">
+                                  ${c.uploaded_image
+                                    ? `<img src="${c.uploaded_image}" class="char-upload-img">`
+                                    : '<div class="char-upload-placeholder">+<br>点击上传</div>'}
+                                </div>
+                                <input type="file" id="charUpload_${c.id}" accept="image/*" style="display:none" onchange="handleCharUpload(event,'${c.id}')">
+                              </div>
+                              <!-- 列三：角色提示词 -->
+                              <div class="char-col char-col-prompt">
+                                <div class="char-col-title">📝 角色提示词</div>
+                                <textarea class="char-prompt-textarea" placeholder="该角色的详细描述，用于生成时保持角色一致性..." onchange="updateCharField('${c.id}','description',this.value)">${escHtml(c.description || "")}</textarea>
+                              </div>
+                            </div>
+                          </div>
+                        `).join("");
+    } catch {}
+  }
+
+  async function addCharacter() {
+    if (!state.currentProject) { alert("请先选择项目"); return; }
+    try {
+      await api("/characters", {
+        method: "POST",
+        body: {
+          project_id: state.currentProject.project_id,
+          name: "新角色",
+          style: "",
+          voice: { gender: "", tone: "", speed: "中" },
+          description: "",
+        }
+      });
+      await loadCharacters();
+    } catch (e) { alert("添加失败: " + e.message); }
+  }
+
+  async function deleteCharacter(charId) {
+    if (!state.currentProject || !confirm("删除该角色？")) return;
+    try {
+      await api("/characters/" + charId + "?project_id=" + state.currentProject.project_id, { method: "DELETE" });
+      await loadCharacters();
+    } catch (e) { alert("删除失败: " + e.message); }
+  }
+
+  async function updateCharField(charId, field, value) {
+    if (!state.currentProject) return;
     const chars = await api("/characters?project_id=" + state.currentProject.project_id);
-    const list = document.getElementById("charList");
-    if (!list) return;
-    if (!chars || chars.length === 0) {
-      list.innerHTML = '<div class="settings-hint" style="padding:8px 0">暂无角色，添加一个</div>';
-      return;
+    const c = chars.find(x => x.id === charId);
+    if (!c) return;
+    const updates = {
+      project_id: state.currentProject.project_id,
+      name: c.name,
+      style: c.style || "",
+      voice: c.voice || { gender: "", tone: "", speed: "中" },
+      description: "",
+    };
+    if (field === "name") updates.name = value;
+    else if (field === "style") updates.style = value;
+    else if (field === "personality") {
+      if (!updates.voice) updates.voice = { gender: "", tone: "", speed: "中" };
+      updates.voice.tone = value;
     }
-    list.innerHTML = chars.map(c => `
-      <div class="char-item">
-        <div class="char-item-info">
-          <strong>${c.name}</strong>
-          <span>${c.style || ""}</span>
-          <span>${c.voice?.gender || ""}/${c.voice?.tone || ""}</span>
-        </div>
-        <div class="char-item-actions">
-          <button class="btn btn-sm btn-outline" onclick="editCharacter('${c.id}')">✎</button>
-          <button class="btn btn-sm btn-outline" onclick="deleteCharacter('${c.id}')">🗑</button>
-        </div>
-      </div>
-    `).join("");
-  } catch {}
-}
-
-async function addCharacter() {
-  if (!state.currentProject) { alert("请先选择项目"); return; }
-  const name = document.getElementById("charName").value.trim();
-  if (!name) { alert("请输入角色名"); return; }
-  const style = document.getElementById("charStyle").value.trim();
-  const gender = document.getElementById("charGender").value;
-  const voiceTone = document.getElementById("charVoice").value.trim() || "默认";
-  try {
-    await api("/characters", {
-      method: "POST",
-      body: {
-        project_id: state.currentProject.project_id,
-        name: name,
-        style: style,
-        voice: { gender: gender, tone: voiceTone, speed: "中" },
-        description: "",
+    await api("/characters/" + charId, { method: "PUT", body: updates });
       }
-    });
-    document.getElementById("charName").value = "";
-    document.getElementById("charStyle").value = "";
-    document.getElementById("charVoice").value = "";
-    await loadCharacters();
-  } catch (e) { alert("添加失败: " + e.message); }
-}
 
-async function editCharacter(charId) {
-  if (!state.currentProject) return;
-  const name = prompt("角色名：");
-  if (!name) return;
-  const style = prompt("风格描述：");
-  const tone = prompt("音色（沉稳/活泼/温柔）：");
-  try {
-    await api("/characters/" + charId, {
-      method: "PUT",
-      body: {
-        project_id: state.currentProject.project_id,
-        name: name,
-        style: style || "",
-        voice: { gender: "", tone: tone || "默认", speed: "中" },
-        description: "",
+      // 重命名角色
+      async function renameCharacter(charId) {
+        const name = prompt("输入新名称：");
+        if (!name) return;
+        await updateCharField(charId, "name", name);
+        const el = document.getElementById("charNameDisplay_" + charId);
+        if (el) el.textContent = name;
       }
-    });
-    await loadCharacters();
-  } catch (e) { alert("修改失败: " + e.message); }
-}
 
-async function deleteCharacter(charId) {
-  if (!state.currentProject || !confirm("删除该角色？")) return;
-  try {
-    await api("/characters/" + charId + "?project_id=" + state.currentProject.project_id, { method: "DELETE" });
-    await loadCharacters();
-  } catch (e) { alert("删除失败: " + e.message); }
-}
+      // 上传角色图片
+  function uploadCharImage(charId) {
+    document.getElementById("charUpload_" + charId).click();
+  }
+  async function handleCharUpload(event, charId) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+      const dataUrl = e.target.result;
+      // 保存到角色数据
+            const chars = await api("/characters?project_id=" + state.currentProject.project_id);
+            const c = chars.find(x => x.id === charId);
+            if (!c) return;
+            await api("/characters/" + charId, {
+              method: "PUT",
+              body: {
+                project_id: state.currentProject.project_id,
+                name: c.name,
+                style: c.style || "",
+                voice: c.voice || { gender: "", tone: "", speed: "中" },
+                description: "",
+                uploaded_image: dataUrl,
+              }
+            });
+      await loadCharacters();
+    };
+    reader.readAsDataURL(file);
+      }
+
+      // 清空上传的图片
+      async function clearUploadedImage(charId) {
+        if (!state.currentProject) return;
+        const chars = await api("/characters?project_id=" + state.currentProject.project_id);
+        const c = chars.find(x => x.id === charId);
+        if (!c) return;
+        await api("/characters/" + charId, {
+          method: "PUT",
+          body: {
+            project_id: state.currentProject.project_id,
+            name: c.name,
+            style: c.style || "",
+            voice: c.voice || { gender: "", tone: "", speed: "中" },
+            description: "",
+            uploaded_image: "",
+          }
+        });
+        await loadCharacters();
+      }
+
+      // ========== 角色三视图生成 ==========
+  const THREE_VIEW_PROMPT = `生成该角色的三视图拼图，布局要求：
+  - 左下角：正面全身图（主视图）
+  - 左上角：背面全身图
+  - 右下角：侧面全身图（侧视图）
+  - 右上角：原图（正面细节图，展示角色面部和服装细节）
+  要求：全身图，四张图角色形象完全一致，服装、发色、体型统一。`;
+
+  async function genThreeView(charId) {
+    if (!state.currentProject) { alert("请先选择项目"); return; }
+    const chars = await api("/characters?project_id=" + state.currentProject.project_id);
+    const char = chars.find(c => c.id === charId);
+    if (!char) { alert("角色不存在"); return; }
+
+    const desc = [char.style, char.voice && char.voice.tone].filter(Boolean).join("，");
+    const prompt = THREE_VIEW_PROMPT + "\n角色描述：" + (desc || char.name);
+    const btn = document.getElementById("gen3Btn_" + charId);
+    if (!btn) return;
+    btn.disabled = true; btn.textContent = "⏳";
+
+    try {
+      const res = await api("/generate-frame", {
+        body: { prompt: prompt, aspect_ratio: "16:9", mode: "three_view", project_id: state.currentProject.project_id, shot_idx: 0 }
+      });
+      if (res.success && res.image_url) {
+        const threeViewData = { images: [res.image_url], prompt: prompt };
+        await api("/characters/" + charId, {
+          method: "PUT",
+          body: {
+            project_id: state.currentProject.project_id,
+            name: char.name,
+            style: char.style || "",
+            voice: char.voice || { gender: "", tone: "", speed: "中" },
+            description: "",
+            three_view: threeViewData,
+          }
+        });
+        await loadCharacters();
+        alert("三视图生成成功！");
+      } else {
+        alert("生成失败: " + (res.error || "未知错误"));
+      }
+    } catch (e) { alert("生成失败: " + e.message); }
+    finally { btn.disabled = false; btn.textContent = "🖼 生成三视图"; }
+  }
+
+  // 转义 HTML 特殊字符
+    function escHtml(str) {
+          return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+        }
+
+        // 同步设置页项目选择器
+        function _syncSettingsSelector() {
+          const pss = document.getElementById("psSettings");
+          if (!pss) return;
+          try {
+            const projs = state.projects;
+            if (!projs || projs.length === 0) return;
+            pss.innerHTML = '<option value="">— 选择项目 —</option>' + projs.map(p => `<option value="${p.project_id}">${p.project_name}</option>`).join("");
+            if (state.currentProject) pss.value = state.currentProject.project_id;
+          } catch {}
+        }
+
+        // ========== 场景管理 ==========
+    async function loadScenes() {
+          const list = document.getElementById("sceneList");
+          if (!list) return;
+          _syncSettingsSelector();
+          if (!state.currentProject) {
+        list.innerHTML = '<div class="settings-hint" style="padding:8px 0">请先选择项目</div>';
+        return;
+      }
+      try {
+        const scenes = await api("/scenes?project_id=" + state.currentProject.project_id);
+        if (!scenes || scenes.length === 0) {
+          list.innerHTML = '<div class="settings-hint" style="padding:8px 0">暂无场景，点击添加</div>';
+          return;
+        }
+        list.innerHTML = scenes.map((s, si) => `
+          <div class="char-item" data-scene-idx="${si}">
+            <div class="char-cols">
+              <!-- 列一：填写信息生成场景图 -->
+              <div class="char-col">
+                <div class="char-col-title">✏️ 填写信息生成场景图 <button class="char-del-btn" onclick="deleteScene('${s.id}')" title="删除场景">弃</button></div>
+                <div class="char-gen-layout">
+                  <div class="char-gen-fields">
+                    <input class="char-field char-name-field" value="${escHtml(s.name === "新场景" ? "未命名" : s.name)}" placeholder="未命名" onchange="updateSceneField('${s.id}','name',this.value)" onclick="this.select()" title="点击重命名">
+                    <input class="char-field" value="${escHtml(s.style || "")}" placeholder="场景风格（如：古风庭院）" onchange="updateSceneField('${s.id}','style',this.value)">
+                    <button class="char-gen-btn" onclick="genSceneImage('${s.id}')" id="genSceneBtn_${s.id}">🖼 生成场景图</button>
+                  </div>
+                  <div class="char-gen-preview" id="scenePreview_${s.id}">
+                    ${s.generated_image
+                      ? `<img src="${s.generated_image}" class="char-preview-img">`
+                      : '<div class="char-preview-placeholder">生成后预览</div>'}
+                  </div>
+                </div>
+              </div>
+              <!-- 列二：上传场景图片 -->
+              <div class="char-col">
+                <div class="char-col-title">
+                  📷 上传场景图片
+                  ${s.uploaded_image ? `<span class="char-clear-btn" onclick="event.stopPropagation();clearSceneImage('${s.id}')">清空</span>` : ""}
+                </div>
+                <div class="char-upload-box" onclick="uploadSceneImage('${s.id}')">
+                  ${s.uploaded_image
+                    ? `<img src="${s.uploaded_image}" class="char-upload-img">`
+                    : '<div class="char-upload-placeholder">+<br>点击上传</div>'}
+                </div>
+                <input type="file" id="sceneUpload_${s.id}" accept="image/*" style="display:none" onchange="handleSceneUpload(event,'${s.id}')">
+              </div>
+              <!-- 列三：场景提示词 -->
+              <div class="char-col char-col-prompt">
+                <div class="char-col-title">📝 场景提示词</div>
+                <textarea class="char-prompt-textarea" placeholder="该场景的详细描述，用于生成时保持场景一致性..." onchange="updateSceneField('${s.id}','description',this.value)">${escHtml(s.description || "")}</textarea>
+              </div>
+            </div>
+          </div>
+        `).join("");
+      } catch {}
+    }
+
+    async function addScene() {
+      if (!state.currentProject) { alert("请先选择项目"); return; }
+      try {
+        await api("/scenes", {
+          method: "POST",
+          body: { project_id: state.currentProject.project_id, name: "新场景", style: "", description: "" }
+        });
+        await loadScenes();
+      } catch (e) { alert("添加失败: " + e.message); }
+    }
+
+    async function deleteScene(sceneId) {
+      if (!state.currentProject || !confirm("删除该场景？")) return;
+      try {
+        await api("/scenes/" + sceneId + "?project_id=" + state.currentProject.project_id, { method: "DELETE" });
+        await loadScenes();
+      } catch (e) { alert("删除失败: " + e.message); }
+    }
+
+    async function updateSceneField(sceneId, field, value) {
+      if (!state.currentProject) return;
+      const scenes = await api("/scenes?project_id=" + state.currentProject.project_id);
+      const s = scenes.find(x => x.id === sceneId);
+      if (!s) return;
+      const updates = { project_id: state.currentProject.project_id, name: s.name, style: s.style || "", description: s.description || "" };
+      if (field === "name") updates.name = value;
+      else if (field === "style") updates.style = value;
+      else if (field === "description") updates.description = value;
+      await api("/scenes/" + sceneId, { method: "PUT", body: updates });
+    }
+
+    function uploadSceneImage(sceneId) {
+      document.getElementById("sceneUpload_" + sceneId).click();
+    }
+    async function handleSceneUpload(event, sceneId) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async function(e) {
+        const dataUrl = e.target.result;
+        const scenes = await api("/scenes?project_id=" + state.currentProject.project_id);
+        const s = scenes.find(x => x.id === sceneId);
+        if (!s) return;
+        await api("/scenes/" + sceneId, {
+          method: "PUT",
+          body: { project_id: state.currentProject.project_id, name: s.name, style: s.style || "", description: s.description || "", uploaded_image: dataUrl }
+        });
+        await loadScenes();
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function clearSceneImage(sceneId) {
+      if (!state.currentProject) return;
+      const scenes = await api("/scenes?project_id=" + state.currentProject.project_id);
+      const s = scenes.find(x => x.id === sceneId);
+      if (!s) return;
+      await api("/scenes/" + sceneId, {
+        method: "PUT",
+        body: { project_id: state.currentProject.project_id, name: s.name, style: s.style || "", description: s.description || "", uploaded_image: "" }
+      });
+      await loadScenes();
+    }
+
+    async function genSceneImage(sceneId) {
+      if (!state.currentProject) { alert("请先选择项目"); return; }
+      const scenes = await api("/scenes?project_id=" + state.currentProject.project_id);
+      const s = scenes.find(x => x.id === sceneId);
+      if (!s) { alert("场景不存在"); return; }
+      const prompt = "生成一张场景图：" + (s.style || s.name) + "，" + (s.description || "");
+      const btn = document.getElementById("genSceneBtn_" + sceneId);
+      if (!btn) return;
+      btn.disabled = true; btn.textContent = "⏳";
+      try {
+        const res = await api("/generate-frame", {
+          body: { prompt: prompt, aspect_ratio: "16:9", mode: "scene", project_id: state.currentProject.project_id, shot_idx: 0 }
+        });
+        if (res.success && res.image_url) {
+          await api("/scenes/" + sceneId, {
+            method: "PUT",
+            body: { project_id: state.currentProject.project_id, name: s.name, style: s.style || "", description: s.description || "", generated_image: res.image_url }
+          });
+          await loadScenes();
+          alert("场景图生成成功！");
+        } else {
+          alert("生成失败: " + (res.error || "未知错误"));
+        }
+      } catch (e) { alert("生成失败: " + e.message); }
+      finally { btn.disabled = false; btn.textContent = "🖼 生成场景图"; }
+    }
 
 // ========== 弹窗关闭 ==========
 document.addEventListener("click", (e) => {

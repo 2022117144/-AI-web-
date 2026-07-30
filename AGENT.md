@@ -31,3 +31,25 @@ run.py 会自动启动 insMind (8005)、insmind2api (5105) 和主服务 (8765)�
 ## 注意
 - 运行前清除 PYTHONPATH/PYTHONHOME 防版本冲突
 - 依赖 venv 是系统 Python 3.11，不是独立 venv
+- 启动用 `/d/万象AI改/.venv/Scripts/python.exe`，不用系统 `python`（指向 Hermes venv）
+
+## 端口占用处理（铁律）
+遇到端口被占，**先自己杀，不问用户**。
+
+查端口用 PowerShell 或 cmd findstr，别用 git-bash 的 grep（管道编码有问题会漏结果）：
+```powershell
+powershell -Command "Get-NetTCPConnection -LocalPort <端口> -ErrorAction SilentlyContinue | Select-Object LocalPort,OwningProcess,State"
+```
+```cmd
+netstat -ano | findstr ":<端口>"
+```
+杀掉：
+```bash
+netstat -ano | findstr ":<端口>" | awk '{print $NF}' | sort -u | while read pid; do
+  [ "$pid" -gt 0 ] 2>/dev/null && taskkill -f -pid $pid 2>/dev/null
+done
+```
+杀不掉（幽灵 socket）用 Python 抢占：
+```python
+python -c "import socket; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(('0.0.0.0',<端口>)); s.close()"
+```

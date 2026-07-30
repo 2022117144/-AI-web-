@@ -26,6 +26,7 @@ import prompts as prompts_mod
 
 # 角色管理
 import characters as chars_mod
+import scenes as scenes_mod
 
 from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -466,19 +467,17 @@ def generate_script(req: ScriptGenerateRequest):
     if not system_prompt:
         system_prompt = "你是一个专业的短视频文案写手。根据用户提供的主题，生成一段自然流畅的旁白文案。"
     user_prompt = (
-            f"主题：{req.topic}\n"
-            f"风格：{req.style or '通用'}\n"
-            f"语调：{req.tone}\n"
-            f"目标时长：约{req.duration_seconds}秒\n\n"
-        f"要求：\n"
-        f"1. shots 数组每个元素对应一个镜头，prompt 用英文描述完整画面\n"
-        f"2. first_frame_prompt 描述该镜头开始时的画面（如物体刚出现、动作起始状态），用于生成首帧图片\n"
-        f"3. last_frame_prompt 描述该镜头结束时的画面（如物体到达位置、动作结束状态），用于生成尾帧图片\n"
-        f"4. 如果镜头是静态的（无运镜、无动作变化），first_frame_prompt 和 last_frame_prompt 可以接近或相同\n"
-        f"5. framing/motion/lighting/voiceover/video_prompt 是可选的，尽量根据剧情推断\n"
-        f"6. srt 数组每个元素对应一条字幕，时间轴与 shots 对齐\n"
-        f"7. 只输出 JSON，不要额外说明\n"
-    )
+                    f"主题：{req.topic}\n"
+                    f"风格：{req.style or '通用'}\n"
+                    f"语调：{req.tone}\n"
+                    f"目标时长：约{req.duration_seconds}秒\n"
+                    f"目标字数：约{req.word_count}字\n\n"
+                f"要求：\n"
+                            f"1. 生成一段短视频旁白/文案，直接输出文案文本，不要额外说明\n"
+                            f"2. 文案需要通顺自然，适合配音旁白\n"
+                            f"3. 文案必须接近{req.word_count}字左右，不足或超出太多都不合格\n"
+                            f"4. 不要输出 JSON 格式，只输出纯文本文案\n"
+            )
 
     result = llm_mod.call_llm(
         messages=[{"role": "user", "content": user_prompt}],
@@ -534,7 +533,7 @@ def analyze_script(req: ScriptGenerateRequest):
     if not topic:
         raise HTTPException(400, "请提供文案内容")
 
-    system_prompt = "你是一个专业的视频分镜师和字幕师。根据文案生成分镜表和SRT字幕。"
+    system_prompt = "你是一个专业的视频分镜师和字幕师。根据文案生成分镜表和SRT字幕。\n首帧提示词和尾帧提示词不能与画面提示词重复，要有起始/结束的区分感。"
     user_prompt = (
         f"文案内容：\n{topic}\n\n"
         f"请生成以下内容，以 JSON 格式输出：\n"
@@ -543,9 +542,9 @@ def analyze_script(req: ScriptGenerateRequest):
         f'    {{\n'
         f'      "index": 1,\n'
         f'      "scene": "场景描述（中文，20-40字）",\n'
-        f'      "prompt": "画面提示词（英文，适合AI出图，30-60词）",\n'
-        f'      "first_frame_prompt": "该镜头开始时的画面描述（英文，用于生成首帧图片，15-30词）",\n'
-        f'      "last_frame_prompt": "该镜头结束时的画面描述（英文，用于生成尾帧图片，15-30词）",\n'
+        f'      "prompt": "画面提示词（英文，适合AI出图，描述该镜头最核心的画面）",\n'
+        f'      "first_frame_prompt": "起始画面（英文，强调镜头开始时的初始构图、角色入场动作、场景建立状态，与prompt有区分度，例如：Character enters from left, sunlight streams through window, wide establishing shot）",\n'
+        f'      "last_frame_prompt": "结束画面（英文，强调镜头结束时的位置变化、情绪收束、过渡到下一镜头的状态，与prompt有区分度，例如：Character now center frame, turns toward camera, soft smile, scene fades to warm bokeh）",\n'
         f'      "duration": 3,\n'
         f'      "framing": "景别（可选：特写/近景/中景/全景）",\n'
         f'      "motion": "运镜（可选：固定/推轨/后拉/摇镜）",\n'
@@ -654,6 +653,8 @@ class CharacterRequest(BaseModel):
     voice: Dict[str, str] = {"gender": "男", "tone": "默认", "speed": "中"}
     reference_image: str = ""
     description: str = ""
+    three_view: dict = {}
+    uploaded_image: str = ""
 
 @app.get("/api/characters")
 def list_characters(project_id: str = ""):
@@ -681,12 +682,14 @@ def update_character(char_id: str, req: CharacterRequest):
     if not req.project_id:
         raise HTTPException(400, "请指定项目")
     result = chars_mod.update_character(req.project_id, char_id, {
-        "name": req.name,
-        "style": req.style,
-        "voice": req.voice,
-        "reference_image": req.reference_image,
-        "description": req.description,
-    })
+                "name": req.name,
+                "style": req.style,
+                "voice": req.voice,
+                "reference_image": req.reference_image,
+                "description": req.description,
+                "three_view": req.three_view,
+                "uploaded_image": req.uploaded_image,
+            })
     if not result:
         raise HTTPException(404, "角色不存在")
     return result
@@ -703,8 +706,69 @@ def delete_character(char_id: str, project_id: str = ""):
 
 
 # ============================================================
-# API: 生成任务（框架，接入你自己的工具）
+# API: 场景管理
+# ============================================================
+
+class SceneRequest(BaseModel):
+    project_id: str = ""
+    scene_id: str = ""
+    name: str = ""
+    style: str = ""
+    description: str = ""
+    uploaded_image: str = ""
+
+
+@app.get("/api/scenes")
+def list_scenes(project_id: str = ""):
+    """列出项目场景"""
+    if not project_id:
+        return []
+    return scenes_mod.list_scenes(project_id)
+
+
+@app.post("/api/scenes")
+def create_scene(req: SceneRequest):
+    """添加场景"""
+    if not req.project_id:
+        raise HTTPException(400, "请指定项目")
+    return scenes_mod.create_scene(req.project_id, {
+        "name": req.name or "新场景",
+        "style": req.style,
+        "description": req.description,
+        "uploaded_image": req.uploaded_image,
+    })
+
+
+@app.put("/api/scenes/{scene_id}")
+def update_scene(scene_id: str, req: SceneRequest):
+    """修改场景"""
+    if not req.project_id:
+        raise HTTPException(400, "请指定项目")
+    result = scenes_mod.update_scene(req.project_id, scene_id, {
+        "name": req.name,
+        "style": req.style,
+        "description": req.description,
+        "uploaded_image": req.uploaded_image,
+    })
+    if not result:
+        raise HTTPException(404, "场景不存在")
+    return result
+
+
+@app.delete("/api/scenes/{scene_id}")
+def delete_scene(scene_id: str, project_id: str = ""):
+    """删除场景"""
+    if not project_id:
+        raise HTTPException(400, "请指定项目")
+    ok = scenes_mod.delete_scene(project_id, scene_id)
+    if not ok:
+        raise HTTPException(404, "场景不存在")
+    return {"status": "deleted"}
+
+
     # ============================================================
+    # API: 生成任务（框架，接入你自己的工具）
+        # ============================================================
 GENERATION_HANDLER = None
 
 def register_generation_handler(handler):
@@ -818,6 +882,97 @@ def test_llm_connection(req: LLMConfigRequest = None):
         return {"ok": False, "reply": "连接超时，请检查地址和网络/代理"}
     except Exception as e:
         return {"ok": False, "reply": f"连接失败: {str(e)[:60]}"}
+
+
+@app.get("/api/llm/keys")
+def list_llm_keys():
+    """列出所有 API Key（不暴露完整 key）"""
+    keys = llm_mod.get_all_key_previews()
+    # 标记当前活跃的 key
+    if keys:
+        keys[0]["is_active"] = True
+    return {"keys": keys, "count": len(keys)}
+
+
+class LLMKeyRequest(BaseModel):
+    api_key: str
+    label: str = ""
+    model: str = ""
+
+
+@app.post("/api/llm/keys")
+def add_llm_key(req: LLMKeyRequest):
+    """添加一个 API Key"""
+    if not req.api_key:
+        raise HTTPException(400, "API Key 不能为空")
+    entry = llm_mod.add_key(req.api_key, req.label)
+    # 保存关联的模型名
+    if req.model:
+        keys = llm_mod.get_keys()
+        for k in keys:
+            if k["id"] == entry["id"]:
+                k["model"] = req.model
+                break
+        llm_mod.save_keys(keys)
+    return {"success": True, "entry": {
+        "id": entry["id"],
+        "label": entry["label"],
+        "model": req.model or "",
+        "preview": entry["key"][:12] + "...",
+    }}
+
+
+@app.delete("/api/llm/keys/{key_id}")
+def delete_llm_key(key_id: str):
+    """删除一个 API Key"""
+    ok = llm_mod.delete_key(key_id)
+    if not ok:
+        raise HTTPException(404, "Key not found")
+    return {"success": True}
+
+
+@app.post("/api/llm/keys/{key_id}/activate")
+def activate_llm_key(key_id: str):
+    """激活指定 key 为当前使用"""
+    keys = llm_mod.get_keys()
+    found = False
+    for k in keys:
+        if k["id"] == key_id:
+            found = True
+            break
+    if not found:
+        raise HTTPException(404, "Key not found")
+    # 把该 key 移到列表第一个位置
+    keys = [k for k in keys if k["id"] != key_id]
+    # 重新加载获取完整 key 数据
+    keys = llm_mod.get_keys()
+    target = None
+    for k in keys:
+        if k["id"] == key_id:
+            target = k
+            break
+    if target:
+        keys.remove(target)
+        keys.insert(0, target)
+        llm_mod.save_keys(keys)
+    return {"success": True}
+
+
+class LLMRenameRequest(BaseModel):
+    label: str
+
+
+@app.post("/api/llm/keys/{key_id}/rename")
+def rename_llm_key(key_id: str, req: LLMRenameRequest):
+    """重命名 API Key"""
+    if not req.label:
+        raise HTTPException(400, "名称不能为空")
+    ok = llm_mod.rename_key(key_id, req.label)
+    if not ok:
+        raise HTTPException(404, "Key not found")
+    return {"success": True}
+
+
 
 @app.get("/api/llm/models")
 def list_llm_models(base_url: str = "", api_key: str = ""):
@@ -995,6 +1150,7 @@ class FrameGenRequest(BaseModel):
     mode: str = "first_frame"
     project_id: str = ""
     shot_idx: int = 0
+    reference_images: list = []  # 参考图 URL 列表，用于角色/场景一致性
 
 class VideoGenRequest(BaseModel):
     prompt: str = ""
@@ -1011,21 +1167,97 @@ import httpx as _httpx
 
 @app.get("/api/image-proxy")
 def image_proxy(url: str):
-    """代理加载图片（绕过CORS/CDN限制）"""
+    """代理加载图片（绕过CORS/CDN限制），带本地磁盘缓存"""
     if not url:
         raise HTTPException(400, "url 参数不能为空")
+
+    # 先尝试从 relay 加载（走 photogpt 的代理）
     try:
         relay_url = f"http://localhost:8005/api/photogpt/image-proxy?url={url}"
         resp = _httpx.get(relay_url, timeout=15, follow_redirects=True)
         if resp.status_code == 200:
             ct = resp.headers.get("content-type", "image/png")
             return Response(content=resp.content, media_type=ct)
-        resp = _httpx.get(url, timeout=15, follow_redirects=True,
-                          headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"})
-        ct = resp.headers.get("content-type", "image/png")
-        return Response(content=resp.content, media_type=ct)
+    except:
+        pass
+
+    # 直接下载（带本地缓存）
+    import hashlib
+    cache_dir = Path("D:/万象AI改/zc_backend/data/project_content/_cache")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
+    ext = ".png"
+    for e in [".png", ".jpg", ".jpeg", ".webp", ".gif"]:
+        if e in url.lower():
+            ext = e
+            break
+    cache_file = cache_dir / f"{url_hash}{ext}"
+
+    if cache_file.exists():
+        ct = "image/png" if ext == ".png" else "image/jpeg" if ext in (".jpg", ".jpeg") else "image/webp" if ext == ".webp" else "image/gif"
+        return Response(content=cache_file.read_bytes(), media_type=ct)
+
+    proxies = {}
+    proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+    if proxy_url:
+        proxies = {"all://": proxy_url}
+    try:
+        resp = _httpx.get(url, timeout=30, follow_redirects=True,
+                          headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"},
+                          proxies=proxies)
+        if resp.status_code == 200:
+            cache_file.write_bytes(resp.content)
+            ct = resp.headers.get("content-type", "image/png")
+            return Response(content=resp.content, media_type=ct)
     except Exception as e:
+        print(f"[image-proxy] httpx 下载失败: {e}")
+        try:
+            import requests as _requests
+            proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+            proxies_dict = {"https": proxy_url, "http": proxy_url} if proxy_url else None
+            r = _requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"}, proxies=proxies_dict)
+            if r.status_code == 200:
+                cache_file.write_bytes(r.content)
+                ct = r.headers.get("content-type", "image/png")
+                return Response(content=r.content, media_type=ct)
+        except Exception as e2:
+            print(f"[image-proxy] requests 也失败: {e2}")
         raise HTTPException(502, f"图片加载失败: {e}")
+
+    raise HTTPException(404, "图片不存在或已失效")
+
+
+@app.get("/api/video-proxy")
+def video_proxy(url: str):
+    """代理加载视频（带本地磁盘缓存）"""
+    if not url:
+        raise HTTPException(400, "url 参数不能为空")
+    import hashlib
+    cache_dir = Path("D:/万象AI改/zc_backend/data/project_content/_cache")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
+    ext = ".mp4"
+    for e in [".mp4", ".webm", ".mov"]:
+        if e in url.lower():
+            ext = e
+            break
+    cache_file = cache_dir / f"{url_hash}{ext}"
+    if cache_file.exists():
+        return FileResponse(str(cache_file))
+    proxies = {}
+    proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+    if proxy_url:
+        proxies = {"all://": proxy_url}
+    try:
+        resp = _httpx.get(url, timeout=60, follow_redirects=True,
+                          proxies=proxies)
+        if resp.status_code == 200:
+            cache_file.write_bytes(resp.content)
+            return FileResponse(str(cache_file))
+    except Exception as e:
+        print(f"[video-proxy] 下载失败: {e}")
+    raise HTTPException(502, "视频加载失败")
+
 
 @app.post("/api/generate-frame")
 def generate_frame(req: FrameGenRequest):
@@ -1033,22 +1265,31 @@ def generate_frame(req: FrameGenRequest):
     if not req.prompt:
         raise HTTPException(400, "prompt 不能为空")
     try:
+        payload = {
+            "prompt": req.prompt,
+            "aspect_ratio": req.aspect_ratio,
+            "output_num": 1,
+            "quality": "medium",
+            "resolution": "1K",
+        }
+        # 如果有参考图，传给 photogpt
+        if req.reference_images:
+            payload["reference_images"] = req.reference_images
         resp = _httpx.post(
-            f"http://localhost:8005/api/photogpt/generate",
-            json={
-                "prompt": req.prompt,
-                "aspect_ratio": req.aspect_ratio,
-                "output_num": 1,
-                "quality": "medium",
-                "resolution": "1K",
-            },
-            timeout=30,
-        )
+                    f"http://localhost:8005/api/photogpt/generate",
+                    json=payload,
+                    timeout=30, trust_env=False,
+                )
         data = resp.json()
         if data.get("success"):
             job_id = data["job_id"]
             image_url = _poll_photogpt_result(job_id)
             if image_url:
+                # 下载到项目本地缓存
+                if req.project_id:
+                    local_path = _download_to_project(req.project_id, "图片", image_url, f"shot_{req.shot_idx}_{req.mode}")
+                    if local_path:
+                        image_url = f"/api/image-proxy?url={image_url}"
                 return {"success": True, "image_url": image_url, "job_id": job_id}
             return {"success": False, "error": "图片生成超时", "job_id": job_id}
         return {"success": False, "error": data.get("error", "提交失败")}
@@ -1057,16 +1298,19 @@ def generate_frame(req: FrameGenRequest):
     except Exception as e:
         raise HTTPException(502, f"生成失败: {e}")
 
-def _poll_photogpt_result(job_id: int, max_poll: int = 60) -> str:
-    """轮询 photogpt 直到拿到图片 URL"""
+def _poll_photogpt_result(job_id: int, max_poll: int = 4) -> str:
+    """轮询 photogpt 直到拿到图片 URL（4次 × 60秒 = 4分钟）"""
     import time
     for i in range(max_poll):
-        time.sleep(3)
+        if i > 0:
+            time.sleep(60)
         try:
             resp = _httpx.get(
                 f"http://localhost:8005/api/photogpt/generate/jobs?page=1&page_size=200",
-                timeout=10,
+                timeout=10, trust_env=False,
             )
+            if resp.status_code != 200:
+                continue
             jobs = resp.json()
             for job in jobs:
                 if job.get("id") == job_id:
@@ -1076,15 +1320,17 @@ def _poll_photogpt_result(job_id: int, max_poll: int = 60) -> str:
                             return urls[0]
                         return ""
                     elif job.get("status") == "failed":
+                        err = job.get("error_message", "") or job.get("error", "") or "图片生成失败"
+                        print(f"图片生成失败 (job {job_id}): {err}")
                         return ""
                     break
-        except:
-            pass
+        except Exception as e:
+            print(f"轮询图片结果异常 (job {job_id}): {e}")
     return ""
 
 @app.post("/api/generate-video")
-def generate_video(req: VideoGenRequest):
-    """单段分镜视频生成 — 调 insmind"""
+async def generate_video(req: VideoGenRequest):
+    """单段分镜视频生成 — 调 insmind（异步轮询，不阻塞其他请求）"""
     if not req.prompt:
         raise HTTPException(400, "prompt 不能为空")
     try:
@@ -1104,9 +1350,10 @@ def generate_video(req: VideoGenRequest):
         if input_images:
             payload["input_images"] = input_images
 
+        # 调 8005 不走代理（trust_env=False 跳过环境变量代理）
         resp = _httpx.post(
             f"http://localhost:8005/api/content/generate",
-            json=payload, timeout=30,
+            json=payload, timeout=30, trust_env=False,
         )
         if resp.status_code != 200:
             return {"success": False, "error": f"提交失败 (HTTP {resp.status_code})"}
@@ -1116,18 +1363,22 @@ def generate_video(req: VideoGenRequest):
         if not job_id:
             return {"success": False, "error": f"返回无 job_id: {data}"}
 
-        video_url = _poll_video_result(job_id, max_poll=120)
+        # 异步轮询，不阻塞其他请求
+        video_url, err_msg = await _poll_video_result_async(job_id)
+        if err_msg:
+            return {"success": False, "error": err_msg, "job_id": job_id}
         if video_url:
             # 下载视频到项目文件夹
             local_path = ""
             if req.project_id:
                 try:
                     local_path = _download_to_project(req.project_id, "视频", video_url, f"shot_{req.shot_idx}")
+                    if local_path:
+                        video_url = f"/api/video-proxy?url={video_url}"
                 except Exception as e:
                     print(f"视频下载到本地失败: {e}")
             return {"success": True, "video_url": video_url, "local_path": local_path, "job_id": job_id}
         return {"success": False, "error": "视频生成超时", "job_id": job_id}
-
     except _httpx.ConnectError:
         raise HTTPException(502, "无法连接视频生成后端 (localhost:8005)")
     except Exception as e:
@@ -1145,12 +1396,22 @@ def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix
             ext = e
             break
     local_file = proj_dir / f"{filename_prefix}{ext}"
+    local_file = proj_dir / f"{filename_prefix}{ext}"
     try:
-        # 使用代理头和超时，兼容 PhotoGPT 的反代 URL
+        # 使用代理，兼容 PhotoGPT 的反代 URL
+        proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+        proxies = {"all://": proxy_url} if proxy_url else None
         resp = dl_httpx.get(url, timeout=60, follow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"})
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"},
+            proxies=proxies)
         if resp.status_code == 200:
-            local_file.write_bytes(resp.content)
+            # 先写临时文件，成功后再覆盖，避免失败时丢旧图
+            tmp_file = local_file.with_suffix(".tmp" + ext)
+            tmp_file.write_bytes(resp.content)
+            if tmp_file.exists():
+                if local_file.exists():
+                    local_file.unlink()
+                tmp_file.rename(local_file)
             return str(local_file)
         print(f"下载失败: HTTP {resp.status_code} for {url[:50]}")
     except Exception as e:
@@ -1158,13 +1419,38 @@ def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix
     return ""
 
 
-def _poll_video_result(job_id: int, max_poll: int = 120) -> str:
-    """轮询 content generation 直到拿到 video URL"""
+async def _poll_video_result_async(job_id: int, max_poll: int = 10) -> tuple:
+    """异步轮询，返回 (video_url, error_message)"""
+    import asyncio
+    for i in range(max_poll):
+        if i > 0:
+            await asyncio.sleep(60)
+        try:
+            resp = _httpx.get(f"http://localhost:8005/api/content/jobs/{job_id}", timeout=10, trust_env=False)
+            if resp.status_code == 404:
+                return ("", "任务不存在")
+            job_data = resp.json()
+            status = job_data.get("status", "")
+            if status == "success":
+                urls = job_data.get("output_urls", [])
+                if urls:
+                    return (urls[0], "")
+                return ("", "生成成功但无输出 URL")
+            elif status in ("failed", "error"):
+                err = job_data.get("error_message", "") or job_data.get("error", "") or "生成失败"
+                return ("", err)
+        except:
+            pass
+    return ("", "视频生成超时")
+
+
+def _poll_video_result(job_id: int, max_poll: int = 10) -> str:
+    """轮询 content generation 直到拿到 video URL（10次 × 60秒 = 10分钟）"""
     import time
     for i in range(max_poll):
-        time.sleep(3)
+        time.sleep(60)
         try:
-            resp = _httpx.get(f"http://localhost:8005/api/content/jobs/{job_id}", timeout=10)
+            resp = _httpx.get(f"http://localhost:8005/api/content/jobs/{job_id}", timeout=10, trust_env=False)
             if resp.status_code == 404:
                 return ""
             job_data = resp.json()
