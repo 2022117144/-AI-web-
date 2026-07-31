@@ -29,33 +29,41 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadPrompts();
   checkStatus();
   // 恢复上次的文案
-  const saved = localStorage.getItem(_projectKey("zctools_script"));
-  if (saved) document.getElementById("storyInput").value = saved;
-  // 自动保存文案到 localStorage（也自动存到项目）+ 实时字数统计
-    document.getElementById("storyInput").addEventListener("input", function() {
-      localStorage.setItem(_projectKey("zctools_script"), this.value);
+    const saved = localStorage.getItem(_projectKey("zctools_script"));
+    if (saved) document.getElementById("storyInput").value = saved;
+    // 自动保存文案到 localStorage（也自动存到项目）+ 实时字数统计
+          document.getElementById("storyInput").addEventListener("input", function() {
+            localStorage.setItem(_projectKey("zctools_script"), this.value);
+            updateCharCount();
+            // 自动保存到后端（防抖）
+            clearTimeout(this._saveTimer);
+            this._saveTimer = setTimeout(() => {
+              if (state.currentProject && this.value.trim()) {
+                saveProjectContent();
+              }
+            }, 1500);
+          });
+      // 初始化字数统计
       updateCharCount();
-    });
-    // 初始化字数统计
-    updateCharCount();
-  // 恢复上次的分镜和SRT
-  const savedShots = localStorage.getItem(_projectKey("zctools_shots"));
-  const savedSrt = localStorage.getItem(_projectKey("zctools_srt"));
-  if (savedShots) renderShots(JSON.parse(savedShots));
-  if (savedSrt) renderSRT(JSON.parse(savedSrt));
-  if (savedShots) {
-    const imgSection = document.getElementById("shotsImagesSection");
-    if (imgSection) imgSection.style.display = "block";
-  }
-  // 恢复分镜完整数据（含图片/视频状态）
-  restoreShotsFromStorage();
-  // 初始化宫格
-  changeGridSize();
-  // 如果已有选中的项目，从后端恢复完整内容
-  const sel = document.getElementById("projectSelector");
-  if (sel.value) {
-    await loadProjectContent(sel.value);
-  }
+    // 初始化宫格
+    changeGridSize();
+    // 从 localStorage 恢复上次选中的项目，然后加载分镜数据
+          const savedPid = localStorage.getItem("zctools_selected_project");
+          if (savedPid) {
+            const sel = document.getElementById("projectSelector");
+            sel.value = savedPid;
+            switchProject(savedPid);
+          }
+      // 检测是否有文案但无分镜，且之前曾点击过分析，自动重新分析
+            setTimeout(async () => {
+              const script = document.getElementById("storyInput").value.trim();
+              const shotsKey = _projectKey("zctools_shots");
+              const existingShots = localStorage.getItem(shotsKey);
+              const hadAnalysis = localStorage.getItem("zctools_had_analysis_" + savedPid);
+              if (script && hadAnalysis && (!existingShots || existingShots === "[]")) {
+                analyzeScript();
+              }
+            }, 500);
   // 恢复上次的 Tab（刷新后保持）— 优先 URL 参数
       const urlParams = new URLSearchParams(window.location.search);
       const urlTab = urlParams.get('tab');
@@ -170,15 +178,16 @@ async function saveProjectContent() {
   try { srt = JSON.parse(localStorage.getItem(_projectKey("zctools_srt")) || "[]"); } catch {}
   let shotData = {};
     try { shotData = JSON.parse(localStorage.getItem(_shotDataKey()) || "{}"); } catch {}
+  const body = {};
+  if (script) body.script_text = script;
+  if (shots.length > 0) body.shots = shots;
+  if (srt.length > 0) body.srt = srt;
+  if (Object.keys(shotData).length > 0) body.shot_data = shotData;
+  const gridSize = parseInt(document.getElementById("gridSizeSelect")?.value);
+  if (gridSize) body.grid_size = gridSize;
   await api("/projects/" + state.currentProject.project_id + "/content", {
     method: "PUT",
-    body: {
-      script_text: script,
-      shots: shots,
-      srt: srt,
-      shot_data: shotData,
-      grid_size: parseInt(document.getElementById("gridSizeSelect")?.value) || 9,
-    }
+    body: body,
   });
 }
 
@@ -288,6 +297,8 @@ async function loadProjects() {
 }
 
 async function switchProject(id) {
+  // 保存选中的项目 ID（刷新后恢复用）
+  localStorage.setItem("zctools_selected_project", id || "");
   // 先保存当前项目内容
   if (state.currentProject) {
     await saveProjectContent();
@@ -394,7 +405,11 @@ async function analyzeScript() {
   }
 
   const btn = document.getElementById("analyzeBtn");
-  btn.disabled = true; btn.textContent = "⏳ 分析中...";
+    btn.disabled = true; btn.textContent = "⏳ 分析中...";
+    // 标记已点击分析，刷新后自动重试
+    if (state.currentProject) {
+      localStorage.setItem("zctools_had_analysis_" + state.currentProject.project_id, "1");
+    }
 
   try {
     const result = await api("/script/analyze", { body: { topic: script, style: "", tone: "叙事", project_id: state.currentProject ? state.currentProject.project_id : "" } });
@@ -406,11 +421,15 @@ async function analyzeScript() {
           localStorage.setItem(_projectKey("zctools_shots_data"), JSON.stringify(result.shots || []));
           state.currentShots = result.shots || [];
           state.currentSRT = result.srt || [];
-                const imgSection = document.getElementById("shotsImagesSection");
-                if (imgSection) imgSection.style.display = "block";
-                // 保存分镜数据到项目
+                          const imgSection = document.getElementById("shotsImagesSection");
+                          if (imgSection) imgSection.style.display = "block";
+                          // 刷新九宫格显示
+                          changeGridSize();
+                          // 保存分镜数据到项目
                 if (state.currentProject) await saveProjectContent();
-                // 自动标记流水线步骤3（SRT音频+分镜提示词）为已完成
+                                // 清除分析重试标记
+                                localStorage.removeItem("zctools_had_analysis_" + state.currentProject.project_id);
+                                // 自动标记流水线步骤3（SRT音频+分镜提示词）为已完成
                 markPipelineStep(3, "completed");
           } else {
       alert("分析失败: " + (typeof result.error === 'string' ? result.error : JSON.stringify(result.error || "未知错误")));
