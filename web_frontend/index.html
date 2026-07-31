@@ -613,8 +613,8 @@ function sbRender() {
             '<td class="sb-col-frame">' +
 '<div class="sb-frame-cell">' +
 '<div class="sb-frame-btns">' +
-'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbGenFirstFrame(' + i + ')">首<br>帧</button>' +
-'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbUploadFrame(' + i + ', \'first\')">上<br>传</button>' +
+'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbGenFirstFrame(' + i + ')" title="生成首帧">✨</button>' +
+'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbUploadFrame(' + i + ', \'first\')" title="上传图片">📁</button>' +
 '</div>' +
 '<div class="sb-frame-preview">' +
 '<div class="sb-frame-img" id="sbFirstImg_' + i + '">' + (s.firstFrame ? '<img src="'+s.firstFrame+'" class="sb-frame-thumb">' : '<div class="sb-frame-placeholder">待生成</div>') + '</div>' +
@@ -624,8 +624,8 @@ function sbRender() {
             '<td class="sb-col-frame">' +
 '<div class="sb-frame-cell">' +
 '<div class="sb-frame-btns">' +
-'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbGenLastFrame(' + i + ')">尾<br>帧</button>' +
-'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbUploadFrame(' + i + ', \'last\')">上<br>传</button>' +
+'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbGenLastFrame(' + i + ')" title="生成尾帧">✨</button>' +
+'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbUploadFrame(' + i + ', \'last\')" title="上传图片">📁</button>' +
 '</div>' +
 '<div class="sb-frame-preview">' +
 '<div class="sb-frame-img" id="sbLastImg_' + i + '">' + (s.lastFrame ? '<img src="'+s.lastFrame+'" class="sb-frame-thumb">' : '<div class="sb-frame-placeholder">待生成</div>') + '</div>' +
@@ -641,10 +641,26 @@ var sbGenStatus = {};
 var sbCurrentProject = localStorage.getItem('wx_selected_project') || '';
 
 function saveSbData() {
-  try {
-    var key = 'sb_data_' + (sbCurrentProject || '_default');
-    localStorage.setItem(key, JSON.stringify({shots:sbShots, status:sbGenStatus}));
-  } catch(e) {}
+  // 保存到后端 API
+  if (!sbCurrentProject) return;
+  var shots = sbShots.map(function(s){
+    return {
+      index: 0,  // 占位，后端会重新编号
+      scene: s.prompt || '',
+      prompt: s.prompt || '',
+      voiceover: s.script || '',
+      duration: 3,
+      first_frame_prompt: s.firstFramePrompt || '',
+      last_frame_prompt: s.lastFramePrompt || '',
+    };
+  });
+  // 每行给一个 index
+  shots.forEach(function(s, i){ s.index = i + 1; });
+  fetch(API_BASE + '/api/projects/' + encodeURIComponent(sbCurrentProject) + '/content', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({shots: shots})
+  }).catch(function(){});
 }
 
 function loadSbData() {
