@@ -1240,20 +1240,18 @@ def image_proxy(url: str):
     cache_file = cache_dir / f"{url_hash}{ext}"
 
     if cache_file.exists():
-        ct = "image/png" if ext == ".png" else "image/jpeg" if ext in (".jpg", ".jpeg") else "image/webp" if ext == ".webp" else "image/gif"
+        ct = 'image/png' if ext == '.png' else 'image/jpeg' if ext in ('.jpg', '.jpeg') else 'image/webp' if ext == '.webp' else 'image/gif'
         return Response(content=cache_file.read_bytes(), media_type=ct)
-
-    proxies = {}
-    proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
-    if proxy_url:
-        proxies = {"all://": proxy_url}
+    
+    proxy_url = os.environ.get('HTTPS_PROXY') or os.environ.get('HTTP_PROXY') or ''
+    proxies = {'all://': proxy_url} if proxy_url else None
     try:
-        resp = _httpx.get(url, timeout=30, follow_redirects=True,
-                          headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"},
-                          proxies=proxies)
+        with _httpx.Client(proxies=proxies, timeout=30, follow_redirects=True) as client:
+            resp = client.get(url,
+                              headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://photogpt.io/'})
         if resp.status_code == 200:
             cache_file.write_bytes(resp.content)
-            ct = resp.headers.get("content-type", "image/png")
+            ct = resp.headers.get('content-type', 'image/png')
             return Response(content=resp.content, media_type=ct)
     except Exception as e:
         print(f"[image-proxy] httpx 下载失败: {e}")
@@ -1289,25 +1287,29 @@ def video_proxy(url: str):
             break
     cache_file = cache_dir / f"{url_hash}{ext}"
     if cache_file.exists():
-        return FileResponse(str(cache_file))
-    proxies = {}
+        ct = "image/png" if ext == ".png" else "image/jpeg" if ext in (".jpg", ".jpeg") else "image/webp" if ext == ".webp" else "image/gif"
+        return Response(content=cache_file.read_bytes(), media_type=ct)
+
     proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
-    if proxy_url:
-        proxies = {"all://": proxy_url}
+    proxies = {"all://": proxy_url} if proxy_url else None
     try:
-        resp = _httpx.get(url, timeout=60, follow_redirects=True,
-                          proxies=proxies)
+        with _httpx.Client(proxies=proxies, timeout=60, follow_redirects=True) as client:
+            resp = client.get(url)
+        if resp.status_code == 200:
+            resp = client.get(url,
+                              headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"})
         if resp.status_code == 200:
             cache_file.write_bytes(resp.content)
-            return FileResponse(str(cache_file))
+            ct = resp.headers.get("content-type", "image/png")
+            return Response(content=resp.content, media_type=ct)
     except Exception as e:
         print(f"[video-proxy] 下载失败: {e}")
     raise HTTPException(502, "视频加载失败")
 
 
 @app.post("/api/generate-frame")
-def generate_frame(req: FrameGenRequest):
-    """单张分镜图片生成 — 调 photogpt"""
+async def generate_frame(req: FrameGenRequest):
+    """单张分镜图片生成 — 调 photogpt（异步，不阻塞其他请求）"""
     if not req.prompt:
         raise HTTPException(400, "prompt 不能为空")
     try:
@@ -1341,15 +1343,15 @@ def generate_frame(req: FrameGenRequest):
                 else:
                     input_urls.append(ref)
             payload["input_urls"] = input_urls
-        resp = _httpx.post(
-                    f"http://localhost:8005/api/photogpt/generate",
-                    json=payload,
-                    timeout=120,
-                )
+        async with _httpx.AsyncClient(timeout=120, trust_env=False) as client:
+            resp = await client.post(
+                "http://localhost:8005/api/photogpt/generate",
+                json=payload,
+            )
         data = resp.json()
         if data.get("success"):
             job_id = data["job_id"]
-            image_url = _poll_photogpt_result(job_id)
+            image_url = await _poll_photogpt_result_async(job_id)
             if image_url:
                 # 下载到项目本地缓存，返回本地路径
                 if req.project_id:
@@ -1365,6 +1367,36 @@ def generate_frame(req: FrameGenRequest):
         raise HTTPException(502, "无法连接 PhotoGPT 后端 (localhost:8005)")
     except Exception as e:
         raise HTTPException(502, f"生成失败: {e}")
+
+async def _poll_photogpt_result_async(job_id: int, max_poll: int = 4) -> str:
+    """异步轮询 photogpt 直到拿到图片 URL（4次 × 60秒 = 4分钟，不阻塞其他请求）"""
+    import asyncio
+    for i in range(max_poll):
+        if i > 0:
+            await asyncio.sleep(60)
+        try:
+            async with _httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"http://localhost:8005/api/photogpt/generate/jobs?page=1&page_size=200",
+                )
+            if resp.status_code != 200:
+                continue
+            jobs = resp.json()
+            for job in jobs:
+                if job.get("id") == job_id:
+                    if job.get("status") == "success":
+                        urls = job.get("output_urls", [])
+                        if urls:
+                            return urls[0]
+                        return ""
+                    elif job.get("status") == "failed":
+                        err = job.get("error_message", "") or job.get("error", "") or "图片生成失败"
+                        print(f"图片生成失败 (job {job_id}): {err}")
+                        return ""
+                    break
+        except Exception as e:
+            print(f"轮询图片结果异常 (job {job_id}): {e}")
+    return ""
 
 def _poll_photogpt_result(job_id: int, max_poll: int = 4) -> str:
     """轮询 photogpt 直到拿到图片 URL（4次 × 60秒 = 4分钟）"""
@@ -1456,19 +1488,24 @@ async def generate_video(req: VideoGenRequest):
 
 @app.get("/api/insmind-accounts/count")
 async def insmind_accounts_count():
-            """查询 insMind 可用账号数"""
-            import sqlite3
-            try:
-                db_path = r"E:\视频生成\dreamina-auto-register-main\backend\data\dreamina.db"
-                conn = sqlite3.connect(db_path)
-                cur = conn.cursor()
-                cur.execute("SELECT COUNT(*) FROM insmind_accounts WHERE status='active' AND token IS NOT NULL AND token != ''")
-                count = cur.fetchone()[0]
-                conn.close()
-                return {"success": count, "total": count}
-            except Exception as e:
-                print(f"查询 insmind 账号数失败: {e}")
-                return {"success": 0, "total": 0, "error": str(e)}
+    """查询 insMind 可用账号数"""
+    import sqlite3
+    try:
+        # 优先尝试本地 data 目录，其次 insMind 项目目录
+        db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'dreamina.db')
+        if not os.path.exists(db_path):
+            alt_path = r"E:\视频生成\dreamina-auto-register-main\backend\data\dreamina.db"
+            if os.path.exists(alt_path):
+                db_path = alt_path
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM insmind_accounts WHERE status='active' AND token IS NOT NULL AND token != ''")
+        count = cur.fetchone()[0]
+        conn.close()
+        return {"success": count, "total": count}
+    except Exception as e:
+        print(f"查询 insmind 账号数失败: {e}")
+        return {"success": 0, "total": 0, "error": str(e)}
 
 
 def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix: str) -> str:
@@ -1484,12 +1521,11 @@ def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix
     local_file = proj_dir / f"{filename_prefix}{ext}"
     local_file = proj_dir / f"{filename_prefix}{ext}"
     try:
-        # 使用代理，兼容 PhotoGPT 的反代 URL
-        proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+        proxy_url = "http://127.0.0.1:7897"
         proxies = {"all://": proxy_url} if proxy_url else None
-        resp = dl_httpx.get(url, timeout=60, follow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"},
-            proxies=proxies)
+        with _httpx.Client(proxies=proxies, timeout=60, follow_redirects=True, trust_env=False) as client:
+            resp = client.get(url,
+                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"})
         if resp.status_code == 200:
             # 先写临时文件，成功后再覆盖，避免失败时丢旧图
             tmp_file = local_file.with_suffix(".tmp" + ext)

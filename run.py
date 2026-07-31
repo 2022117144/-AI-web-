@@ -5,8 +5,6 @@ import sys, os
 
 ZC_DIR = os.path.join(os.path.dirname(__file__), 'zc_backend')
 sys.path.insert(0, ZC_DIR)
-sys.path.insert(0, r'E:\万象AI-2改\src')
-sys.path.insert(0, r'E:\万象AI-2改')
 
 # 加载智创依赖
 import pipeline

@@ -1,8 +1,8 @@
 """
 图片生成路由
 
-直接调用万象AI-2改 的 PhotoGPT 图片生成接口。
-硬编码模型为 PhotoGPT，地址从 A0_config.config 读取。
+调用 PhotoGPT 后端生成图片。
+地址硬编码为 localhost:8005（与 zc_backend/handlers.py 一致）。
 """
 import sys
 import os
@@ -11,21 +11,14 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-# ── 将万象AI-2改 源码加入路径 ──────────────────────────────────────────
-WANXIANG_2_SRC = r"E:\万象AI-2改\src"
-if WANXIANG_2_SRC not in sys.path:
-    sys.path.insert(0, WANXIANG_2_SRC)
-
-# ── 导入万象AI-2改 的配置模块 ──────────────────────────────────────────
 router = APIRouter(prefix="/api/image", tags=["image"])
 
-# ── PhotoGPT 默认地址 ──────────────────────────────────────────────────
-DEFAULT_PHOTOGPT_URL = "http://localhost:8005"
+# PhotoGPT 地址（与 zc_backend/handlers.py 一致）
+PHOTOGPT_URL = "http://localhost:8005"
 POLL_INTERVAL = 3
 MAX_POLL = 60
 
 
-# ── 请求/响应模型 ────────────────────────────────────────────────────────
 class ImageGenerateRequest(BaseModel):
     prompt: str = Field(..., description="生成图片的提示词")
     model: str = Field(default="PhotoGPT", description="模型名称（当前仅支持 PhotoGPT）")
@@ -38,25 +31,13 @@ class ImageGenerateResponse(BaseModel):
     model: str = Field(default="PhotoGPT", description="实际使用的模型")
 
 
-def _get_photogpt_url() -> str:
-    """从配置中读取 PhotoGPT 服务地址"""
-    # 延迟加载 A0_config
-    from 任务运行文件 import A0_config
-    # 优先使用 接口地址，其次 other接口地址，最后默认值
-    return (
-        A0_config.config.get("接口地址")
-        or A0_config.config.get("other接口地址")
-        or DEFAULT_PHOTOGPT_URL
-    )
-
-
-def _poll_job(photogpt_url: str, job_id: int) -> dict:
+def _poll_job(job_id: int) -> dict:
     """轮询 PhotoGPT 任务直到完成或超时"""
     for i in range(MAX_POLL):
         time.sleep(POLL_INTERVAL)
         try:
             resp = httpx.get(
-                f"{photogpt_url}/api/photogpt/generate/jobs?page=1&page_size=200",
+                f"{PHOTOGPT_URL}/api/photogpt/generate/jobs?page=1&page_size=200",
                 timeout=10,
             )
             jobs = resp.json()
@@ -77,30 +58,14 @@ def _poll_job(photogpt_url: str, job_id: int) -> dict:
     return {"success": False, "error": "轮询超时"}
 
 
-# ── 路由 ─────────────────────────────────────────────────────────────────
 @router.post("/generate", response_model=ImageGenerateResponse)
 async def generate_image(req: ImageGenerateRequest):
-    """
-    图片生成接口。
-
-    接受提示词和模型名，调用 PhotoGPT 后端生成图片。
-    当前硬编码模型为 PhotoGPT，model 参数留作扩展。
-
-    请求示例:
-        POST /api/image/generate
-        {
-            "prompt": "一只可爱的猫，赛博朋克风格",
-            "model": "PhotoGPT"
-        }
-    """
-    photogpt_url = _get_photogpt_url()
-    print(f"[PhotoGPT] 服务地址: {photogpt_url}")
+    """图片生成接口"""
     print(f"[PhotoGPT] 提示词: {req.prompt}")
 
     try:
-        # 提交图片生成任务
         resp = httpx.post(
-            f"{photogpt_url}/api/photogpt/generate",
+            f"{PHOTOGPT_URL}/api/photogpt/generate",
             json={
                 "prompt": req.prompt,
                 "aspect_ratio": "16:9",
@@ -126,9 +91,7 @@ async def generate_image(req: ImageGenerateRequest):
             )
 
         print(f"[PhotoGPT] 任务已提交, job_id={job_id}，开始轮询...")
-
-        # 轮询等待结果
-        poll_result = _poll_job(photogpt_url, job_id)
+        poll_result = _poll_job(job_id)
 
         if not poll_result.get("success"):
             return ImageGenerateResponse(

@@ -6,13 +6,13 @@ import os
 import json
 from pathlib import Path
 
-# 将万象AI-2改源码加入路径
-WANXIANG_2_SRC = r"E:\万象AI-2改\src"
-if WANXIANG_2_SRC not in sys.path:
-    sys.path.insert(0, WANXIANG_2_SRC)
+# 将 zc_backend 目录加入路径
+ZC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'zc_backend')
+if ZC_DIR not in sys.path:
+    sys.path.insert(0, ZC_DIR)
 
-from zctools import zc_llm as llm_mod
-from zctools import zc_pipeline as pipeline_mod
+from zc_backend import llm as llm_mod
+from zc_backend import pipeline as pipeline_mod
 
 # 数据目录
 DATA_DIR = Path(__file__).parent / "data"

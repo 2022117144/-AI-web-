@@ -29,18 +29,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadPrompts();
   checkStatus();
   // 恢复上次的文案
-  const saved = localStorage.getItem("zctools_script");
+  const saved = localStorage.getItem(_projectKey("zctools_script"));
   if (saved) document.getElementById("storyInput").value = saved;
   // 自动保存文案到 localStorage（也自动存到项目）+ 实时字数统计
     document.getElementById("storyInput").addEventListener("input", function() {
-      localStorage.setItem("zctools_script", this.value);
+      localStorage.setItem(_projectKey("zctools_script"), this.value);
       updateCharCount();
     });
     // 初始化字数统计
     updateCharCount();
   // 恢复上次的分镜和SRT
-  const savedShots = localStorage.getItem("zctools_shots");
-  const savedSrt = localStorage.getItem("zctools_srt");
+  const savedShots = localStorage.getItem(_projectKey("zctools_shots"));
+  const savedSrt = localStorage.getItem(_projectKey("zctools_srt"));
   if (savedShots) renderShots(JSON.parse(savedShots));
   if (savedSrt) renderSRT(JSON.parse(savedSrt));
   if (savedShots) {
@@ -165,11 +165,11 @@ async function saveProjectContent() {
   if (!state.currentProject) return;
   const script = document.getElementById("storyInput").value;
   let shots = [];
-  try { shots = JSON.parse(localStorage.getItem("zctools_shots_data") || "[]"); } catch {}
+  try { shots = JSON.parse(localStorage.getItem(_projectKey("zctools_shots_data")) || "[]"); } catch {}
   let srt = [];
-  try { srt = JSON.parse(localStorage.getItem("zctools_srt") || "[]"); } catch {}
+  try { srt = JSON.parse(localStorage.getItem(_projectKey("zctools_srt")) || "[]"); } catch {}
   let shotData = {};
-  try { shotData = JSON.parse(localStorage.getItem("zctools_shot_data") || "{}"); } catch {}
+    try { shotData = JSON.parse(localStorage.getItem(_shotDataKey()) || "{}"); } catch {}
   await api("/projects/" + state.currentProject.project_id + "/content", {
     method: "PUT",
     body: {
@@ -192,13 +192,13 @@ async function loadProjectContent(projectId, clearIfEmpty = false) {
     // 恢复文案
     if (content.script_text) {
       document.getElementById("storyInput").value = content.script_text;
-      localStorage.setItem("zctools_script", content.script_text);
+      localStorage.setItem(_projectKey("zctools_script"), content.script_text);
       hasData = true;
     }
     // 恢复分镜
     if (content.shots && content.shots.length > 0) {
-      localStorage.setItem("zctools_shots", JSON.stringify(content.shots));
-      localStorage.setItem("zctools_shots_data", JSON.stringify(content.shots));
+      localStorage.setItem(_projectKey("zctools_shots"), JSON.stringify(content.shots));
+            localStorage.setItem(_projectKey("zctools_shots_data"), JSON.stringify(content.shots));
       state.currentShots = content.shots;
       renderShots(content.shots);
       const imgSection = document.getElementById("shotsImagesSection");
@@ -207,13 +207,13 @@ async function loadProjectContent(projectId, clearIfEmpty = false) {
     }
     // 恢复 SRT
     if (content.srt && content.srt.length > 0) {
-      localStorage.setItem("zctools_srt", JSON.stringify(content.srt));
+      localStorage.setItem(_projectKey("zctools_srt"), JSON.stringify(content.srt));
       renderSRT(content.srt);
       hasData = true;
     }
     // 恢复分镜图片/视频数据
     if (content.shot_data && Object.keys(content.shot_data).length > 0) {
-      localStorage.setItem("zctools_shot_data", JSON.stringify(content.shot_data));
+          localStorage.setItem(_shotDataKey(), JSON.stringify(content.shot_data));
       hasData = true;
     }
     // 恢复宫格尺寸
@@ -230,20 +230,20 @@ async function loadProjectContent(projectId, clearIfEmpty = false) {
         // 清理该项目没有的数据（文案之外的数据，切换项目时用）
         if (clearIfEmpty) {
           if (!content.shots || content.shots.length === 0) {
-            localStorage.removeItem("zctools_shots");
-            localStorage.removeItem("zctools_shots_data");
+            localStorage.removeItem(_projectKey("zctools_shots"));
+                        localStorage.removeItem(_projectKey("zctools_shots_data"));
             state.currentShots = [];
             const grid = document.getElementById("shotsGrid");
             if (grid) grid.innerHTML = '<div class="shots-placeholder">未生成分镜</div>';
             document.getElementById("shotDetailPanel").style.display = "none";
           }
           if (!content.srt || content.srt.length === 0) {
-            localStorage.removeItem("zctools_srt");
+            localStorage.removeItem(_projectKey("zctools_srt"));
             const srtEl = document.getElementById("srtOutput");
             if (srtEl) srtEl.value = "（未生成字幕）";
           }
           if (!content.shot_data || Object.keys(content.shot_data).length === 0) {
-            localStorage.removeItem("zctools_shot_data");
+                      localStorage.removeItem(_shotDataKey());
           }
         }
         // 如果后端没数据且 clearIfEmpty=true，清空界面（切换项目时）
@@ -257,11 +257,11 @@ async function loadProjectContent(projectId, clearIfEmpty = false) {
 
 function clearProjectContent() {
   document.getElementById("storyInput").value = "";
-  localStorage.removeItem("zctools_script");
-  localStorage.removeItem("zctools_shots");
-  localStorage.removeItem("zctools_shots_data");
-  localStorage.removeItem("zctools_srt");
-  localStorage.removeItem("zctools_shot_data");
+  localStorage.removeItem(_projectKey("zctools_script"));
+    localStorage.removeItem(_projectKey("zctools_shots"));
+    localStorage.removeItem(_projectKey("zctools_shots_data"));
+    localStorage.removeItem(_projectKey("zctools_srt"));
+    localStorage.removeItem(_shotDataKey());
   state.currentShots = [];
   const grid = document.getElementById("shotsGrid");
   if (grid) grid.innerHTML = '<div class="shots-placeholder">未生成分镜</div>';
@@ -383,7 +383,7 @@ async function analyzeScript() {
   let script = document.getElementById("storyInput").value.trim();
   if (!script) {
     // 如果当前 iframe 的 storyInput 为空，尝试从 localStorage 恢复文案
-    script = localStorage.getItem("zctools_script") || "";
+    script = localStorage.getItem(_projectKey("zctools_script")) || "";
     if (script) {
       document.getElementById("storyInput").value = script;
     } else {
@@ -401,9 +401,9 @@ async function analyzeScript() {
     if (result.generated) {
           renderShots(result.shots || []);
           renderSRT(result.srt || []);
-          localStorage.setItem("zctools_shots", JSON.stringify(result.shots || []));
-          localStorage.setItem("zctools_srt", JSON.stringify(result.srt || []));
-          localStorage.setItem("zctools_shots_data", JSON.stringify(result.shots || []));
+          localStorage.setItem(_projectKey("zctools_shots"), JSON.stringify(result.shots || []));
+                    localStorage.setItem(_projectKey("zctools_srt"), JSON.stringify(result.srt || []));
+          localStorage.setItem(_projectKey("zctools_shots_data"), JSON.stringify(result.shots || []));
           state.currentShots = result.shots || [];
           state.currentSRT = result.srt || [];
                 const imgSection = document.getElementById("shotsImagesSection");
@@ -428,7 +428,7 @@ function renderShots(shots) {
   }
   // 保存到 state 和 localStorage
   state.currentShots = shots;
-  localStorage.setItem("zctools_shots_data", JSON.stringify(shots));
+  localStorage.setItem(_projectKey("zctools_shots_data"), JSON.stringify(shots));
   grid.innerHTML = shots.map((s, i) => {
         // 首帧prompt：分镜1显示 first_frame_prompt，其他显示 last_frame_prompt（继承自上一分镜）
         let framePrompt = "";
@@ -522,11 +522,11 @@ function savePromptEdit(shotIdx, fieldName) {
   // 更新 localStorage
   var key = fieldName === 'first_frame_prompt' ? 'first_frame_prompt' : 'last_frame_prompt';
   try {
-    var saved = JSON.parse(localStorage.getItem("zctools_shots_data") || "[]");
-    if (saved[shotIdx]) {
-      saved[shotIdx][fieldName] = newText;
-      localStorage.setItem("zctools_shots_data", JSON.stringify(saved));
-      localStorage.setItem("zctools_shots", JSON.stringify(saved));
+    var saved = JSON.parse(localStorage.getItem(_projectKey("zctools_shots_data")) || "[]");
+        if (saved[shotIdx]) {
+          saved[shotIdx][fieldName] = newText;
+          localStorage.setItem(_projectKey("zctools_shots_data"), JSON.stringify(saved));
+          localStorage.setItem(_projectKey("zctools_shots"), JSON.stringify(saved));
     }
   } catch(e) {}
 
@@ -750,18 +750,33 @@ function handleFrameUpload(e, type) {
   e.target.value = "";
 }
 
+function _projectKey(prefix) {
+  const pid = (state.currentProject && state.currentProject.project_id) || "_default";
+  return prefix + "_" + pid;
+}
+
+function _shotDataKey() {
+  // 按项目隔离 shot_data，避免切换项目时显示旧项目的图片
+  const pid = (state.currentProject && state.currentProject.project_id) || "_default";
+  return "zctools_shot_data_" + pid;
+}
+
 function loadShotData(idx) {
   try {
-    const all = JSON.parse(localStorage.getItem("zctools_shot_data") || "{}");
+    const all = JSON.parse(localStorage.getItem(_shotDataKey()) || "{}");
     return all[idx] || {};
   } catch { return {}; }
 }
 
 function saveShotData(idx, data) {
   try {
-    const all = JSON.parse(localStorage.getItem("zctools_shot_data") || "{}");
+    const all = JSON.parse(localStorage.getItem(_shotDataKey()) || "{}");
     all[idx] = { ...(all[idx] || {}), ...data };
-    localStorage.setItem("zctools_shot_data", JSON.stringify(all));
+    localStorage.setItem(_shotDataKey(), JSON.stringify(all));
+    // 自动保存到后端
+    if (state.currentProject) {
+      saveProjectContent();
+    }
   } catch {}
 }
 
@@ -818,11 +833,12 @@ async function genFirstFrame(idx) {
     if (!state.shotGenerating[idx]) state.shotGenerating[idx] = {};
     state.shotGenerating[idx].first = true;
     // 仅非批量模式（有选中分镜且是当前分镜）时更新按钮
-    const isSingle = idx === state.selectedShotIdx;
-    if (isSingle) {
-      const btn = document.getElementById("genFirstBtn");
-      btn.disabled = true; btn.textContent = "⏳";
-    }
+        const isSingle = idx === state.selectedShotIdx;
+        let btn = null;
+        if (isSingle) {
+          btn = document.getElementById("genFirstBtn");
+          btn.disabled = true; btn.textContent = "⏳";
+        }
     // 占位文字改为"生成中..."
     setFrameGenerating("firstFrameImage", idx);
     persistShotGenerating();
@@ -889,11 +905,12 @@ async function genFirstFrame(idx) {
                                       if (!state.shotGenerating[idx]) state.shotGenerating[idx] = {};
                                       state.shotGenerating[idx].last = true;
                                       // 仅非批量模式时更新按钮
-                                      const isSingle = idx === state.selectedShotIdx;
-                                      if (isSingle) {
-                                        const btn = document.getElementById("genLastBtn");
-                                        btn.disabled = true; btn.textContent = "⏳";
-                                      }
+                                                                            const isSingle = idx === state.selectedShotIdx;
+                                                                            let btn = null;
+                                                                            if (isSingle) {
+                                                                              btn = document.getElementById("genLastBtn");
+                                                                              btn.disabled = true; btn.textContent = "⏳";
+                                                                            }
                                       // 占位文字改为"生成中..."
                                                       setFrameGenerating("lastFrameImage", idx);
                                                       persistShotGenerating();
@@ -1237,7 +1254,7 @@ async function batchGenFrames() {
 // 恢复状态
 function restoreShotsFromStorage() {
   try {
-    const data = localStorage.getItem("zctools_shots_data");
+    const data = localStorage.getItem(_projectKey("zctools_shots_data"));
     if (data) {
       state.currentShots = JSON.parse(data);
       renderShots(state.currentShots);
@@ -1615,7 +1632,7 @@ async function generateScript() {
     const result = await api("/script/generate", { body: { topic, style: "", tone, duration_seconds: 30, word_count: wordCount, system_prompt_id: promptId } });
     if (result.generated && result.script) {
                   document.getElementById("storyInput").value = result.script;
-                  localStorage.setItem("zctools_script", result.script);
+                  localStorage.setItem(_projectKey("zctools_script"), result.script);
                   updateCharCount();
                   // 保存到后端，确保分镜/流水线能读到
               if (state.currentProject) await saveProjectContent();
@@ -1639,7 +1656,7 @@ async function modifyScript() {
     const result = await api("/script/modify", { body: { topic: currentScript, custom_prompt: instruction } });
     if (result.modified && result.script) {
               document.getElementById("storyInput").value = result.script;
-              localStorage.setItem("zctools_script", result.script);
+              localStorage.setItem(_projectKey("zctools_script"), result.script);
               updateCharCount();
               // 保存到后端
           if (state.currentProject) await saveProjectContent();

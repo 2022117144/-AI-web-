@@ -130,8 +130,9 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
                           <iframe class="zc-iframe" src="/zc/?tab=shots&v=2"></iframe>
                         </div>
                         <!-- 分镜表 -->
-                        <div class="wx-page" id="wx-storyboard">
-                          <div style="display:flex;flex:1;min-height:0;overflow:hidden">
+                                                <div class="wx-page" id="wx-storyboard">
+                                                  <div class="proj-select-bar" style="padding:6px 14px;margin-bottom:4px"><span class="ps-label">📁 项目</span><select class="ps-select" id="psStoryboard" onchange="onPsChange('storyboard',this.value)"><option value="">— 选择项目 —</option></select></div>
+                                                  <div style="display:flex;flex:1;min-height:0;overflow:hidden">
                             <div class="sb-main" id="sbMain">
                               <div class="sb-toolbar">
                                 <span class="sb-title">📋 分镜表</span>
@@ -226,7 +227,7 @@ var t=document.getElementById('wx-'+this.dataset.wx);
 if(t)t.classList.add('active');
 if (this.dataset.wx === 'batch') loadProjects();
 if (this.dataset.wx === 'logs') refreshLogs();
-if (this.dataset.wx === 'storyboard') { sbCurrentProject = localStorage.getItem('wx_selected_project') || ''; loadSbData(); sbRender(); }
+if (this.dataset.wx === 'storyboard') { var pid = localStorage.getItem('wx_selected_project') || ''; sbLoadFromProject(pid); }
 saveCurrentPage();
 })});
 restoreLastPage();
@@ -471,7 +472,7 @@ function closeRename() { document.getElementById('renameModal').style.display = 
 
 // ====== 项目选择器（文案/分镜/流水线） ======
 function loadProjectSelectors(selectProjectId) {
-  var selIds = ['psCopy', 'psShots', 'psPipeline'];
+  var selIds = ['psCopy', 'psShots', 'psPipeline', 'psStoryboard'];
   fetch(API_BASE + '/api/projects').then(function(r){return r.json()}).then(function(data){
     var projs = Object.values(data);
     var opts = '<option value="">— 选择项目 —</option>';
@@ -494,14 +495,18 @@ function onPsChange(tab, projectId) {
   var sel = document.getElementById('psCopy');
   var opt = sel && sel.querySelector('option[value="'+projectId+'"]');
   if (opt) localStorage.setItem('wx_selected_project_name', opt.textContent);
-  // 同步设置三个选择器的值（立即生效，不等 API）
-  ['psCopy', 'psShots', 'psPipeline'].forEach(function(id) {
+  // 同步设置所有选择器的值（立即生效，不等 API）
+    ['psCopy', 'psShots', 'psPipeline', 'psStoryboard'].forEach(function(id) {
     var el = document.getElementById(id);
     if (el) el.value = projectId;
   });
   // 异步刷新选项列表（保持最新）
-  loadProjectSelectors(projectId);
-  // tab 映射：copy→script, shots→shots, pipeline→pipeline
+    loadProjectSelectors(projectId);
+    // 分镜表加载对应项目的数据
+    if (document.getElementById('wx-storyboard').classList.contains('active')) {
+      sbLoadFromProject(projectId);
+    }
+    // tab 映射：copy→script, shots→shots, pipeline→pipeline
   var tabMap = {copy:'script', shots:'shots', pipeline:'pipeline'};
   // 三个 iframe 都刷新（同步项目）
   ['copy', 'shots', 'pipeline'].forEach(function(t) {
@@ -514,28 +519,62 @@ var savedProj = localStorage.getItem('wx_selected_project');
 var savedName = localStorage.getItem('wx_selected_project_name');
 if (savedProj) {
   // 先直接插入选项（不管 API 是否可用）
-  ['psCopy', 'psShots', 'psPipeline'].forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el) {
-      var opt = document.createElement('option');
-      opt.value = savedProj;
-      opt.textContent = savedName || '已选项目';
-      el.appendChild(opt);
-      el.value = savedProj;
-    }
-  });
-  // 同步刷新三个 iframe，让智创工具知道选中的项目
+  ['psCopy', 'psShots', 'psPipeline', 'psStoryboard'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) {
+        var opt = document.createElement('option');
+        opt.value = savedProj;
+        opt.textContent = savedName || '已选项目';
+        el.appendChild(opt);
+        el.value = savedProj;
+      }
+    });
+    // 同步刷新三个 iframe，让智创工具知道选中的项目
   var tabMap = {copy:'script', shots:'shots', pipeline:'pipeline'};
   ['copy', 'shots', 'pipeline'].forEach(function(t) {
     var iframe = document.querySelector('#wx-'+t+' iframe');
     if (iframe) iframe.src = '/zc/?tab='+tabMap[t]+'&project_id='+encodeURIComponent(savedProj)+'&v='+Date.now();
   });
-}
-// 不管有没有保存的项目，都拉一次列表
+      // 加载分镜表数据
+      sbLoadFromProject(savedProj);
+  }
+  // 不管有没有保存的项目，都拉一次列表
 loadProjectSelectors(savedProj || undefined);
 
 // ====== 分镜表 ======
 var sbShots = [];
+var sbGenStatus = {};
+var sbCurrentProject = '';
+
+function sbLoadFromProject(projectId) {
+  if (!projectId) return;
+  sbCurrentProject = projectId;
+  fetch(API_BASE + '/api/projects/' + encodeURIComponent(projectId) + '/content')
+    .then(function(r){return r.json()})
+    .then(function(data){
+      if (data && data.shots && data.shots.length > 0) {
+        sbShots = data.shots.map(function(s, i){
+          var sd = (data.shot_data || {})[String(i)] || {};
+          return {
+            script: s.voiceover || '',
+            prompt: s.prompt || '',
+            character: sd.character || '',
+            scene: sd.scene || '',
+            prop: sd.prop || '',
+            firstFrame: sd.firstFrame || '',
+            lastFrame: sd.lastFrame || '',
+            video: sd.video || '',
+          };
+        });
+        sbGenStatus = {};
+      } else {
+        sbShots = [];
+        sbGenStatus = {};
+      }
+      sbRender();
+    })
+    .catch(function(){});
+}
 
 function sbRender() {
   var tbody = document.getElementById('sbBody');

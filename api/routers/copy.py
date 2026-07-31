@@ -7,13 +7,10 @@ import json
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-# 将项目根目录和万象AI-2改源码加入路径
-PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if PROJ_ROOT not in sys.path:
-    sys.path.insert(0, PROJ_ROOT)
-WANXIANG_2_SRC = r"E:\万象AI-2改\src"
-if WANXIANG_2_SRC not in sys.path:
-    sys.path.insert(0, WANXIANG_2_SRC)
+# 将 zc_backend 目录加入路径
+ZC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'zc_backend')
+if ZC_DIR not in sys.path:
+    sys.path.insert(0, ZC_DIR)
 
 from core.copy_tools import generate_copy, modify_copy, save_copy, load_copy, generate_storyboard
 
