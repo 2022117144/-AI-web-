@@ -397,7 +397,7 @@ async function analyzeScript() {
   btn.disabled = true; btn.textContent = "⏳ 分析中...";
 
   try {
-    const result = await api("/script/analyze", { body: { topic: script, style: "", tone: "叙事" } });
+    const result = await api("/script/analyze", { body: { topic: script, style: "", tone: "叙事", project_id: state.currentProject ? state.currentProject.project_id : "" } });
     if (result.generated) {
           renderShots(result.shots || []);
           renderSRT(result.srt || []);
@@ -660,14 +660,16 @@ function selectShot(idx) {
     }
 
     const firstFrameSrc = ownFirstFrame || inheritedUrl;
-        if (firstFrameSrc) {
-          if (firstFrameSrc.startsWith("data:")) {
-            firstImg.innerHTML = `<img src="${firstFrameSrc}" class="frame-img" alt="首帧">` + (isInherited ? '<div class="inherited-badge">⬆ 继承</div>' : '');
-          } else if (firstFrameSrc.startsWith("http")) {
-            firstImg.innerHTML = `<img src="/api/image-proxy?url=${encodeURIComponent(firstFrameSrc)}" class="frame-img" alt="首帧">` + (isInherited ? '<div class="inherited-badge">⬆ 继承</div>' : '');
-          } else {
-            firstImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
-          }
+            if (firstFrameSrc) {
+              if (firstFrameSrc.startsWith("data:")) {
+                firstImg.innerHTML = `<img src="${firstFrameSrc}" class="frame-img" alt="首帧">` + (isInherited ? '<div class="inherited-badge">⬆ 继承</div>' : '');
+              } else if (firstFrameSrc.startsWith("http")) {
+                firstImg.innerHTML = `<img src="/api/image-proxy?url=${encodeURIComponent(firstFrameSrc)}" class="frame-img" alt="首帧">` + (isInherited ? '<div class="inherited-badge">⬆ 继承</div>' : '');
+              } else if (firstFrameSrc.startsWith("/api/")) {
+                firstImg.innerHTML = `<img src="${firstFrameSrc}" class="frame-img" alt="首帧">` + (isInherited ? '<div class="inherited-badge">⬆ 继承</div>' : '');
+              } else {
+                firstImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
+              }
         } else {
           // 检查是否正在生成中
           const gen = state.shotGenerating[idx] || {};
@@ -683,10 +685,12 @@ function selectShot(idx) {
     lastImg.dataset.shotIdx = idx;
     const ownLastFrame = shotData.lastFrame || shotData.lastFrameUploaded;
     if (ownLastFrame && ownLastFrame.startsWith("data:")) {
-      lastImg.innerHTML = `<img src="${ownLastFrame}" class="frame-img" alt="尾帧">`;
-    } else if (ownLastFrame && ownLastFrame.startsWith("http")) {
-      lastImg.innerHTML = `<img src="/api/image-proxy?url=${encodeURIComponent(ownLastFrame)}" class="frame-img" alt="尾帧">`;
-    } else if (ownLastFrame) {
+          lastImg.innerHTML = `<img src="${ownLastFrame}" class="frame-img" alt="尾帧">`;
+        } else if (ownLastFrame && ownLastFrame.startsWith("http")) {
+          lastImg.innerHTML = `<img src="/api/image-proxy?url=${encodeURIComponent(ownLastFrame)}" class="frame-img" alt="尾帧">`;
+        } else if (ownLastFrame && ownLastFrame.startsWith("/api/")) {
+          lastImg.innerHTML = `<img src="${ownLastFrame}" class="frame-img" alt="尾帧">`;
+        } else if (ownLastFrame) {
       lastImg.innerHTML = '<div class="frame-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%">待生成</div>';
     } else {
       // 检查是否正在生成中
@@ -775,7 +779,28 @@ function persistShotGenerating() {
   localStorage.setItem("zctools_shot_generating_" + pid, JSON.stringify(state.shotGenerating));
 }
 
-function genFirstFrame(idx) {
+/**
+ * 收集当前项目的角色和场景参考图 URL
+ */
+async function _getReferenceImages() {
+  if (!state.currentProject) return [];
+  const refs = [];
+  try {
+    const chars = await api("/characters?project_id=" + state.currentProject.project_id);
+    for (const c of chars) {
+      if (c.uploaded_image) refs.push(c.uploaded_image);
+      if (c.three_view && c.three_view.images) refs.push(...c.three_view.images);
+    }
+    const scenes = await api("/scenes?project_id=" + state.currentProject.project_id);
+    for (const s of scenes) {
+      if (s.uploaded_image) refs.push(s.uploaded_image);
+      if (s.generated_image) refs.push(s.generated_image);
+    }
+  } catch (e) { /* 静默失败，不影响主流程 */ }
+  return refs;
+}
+
+async function genFirstFrame(idx) {
   if (!requireProject()) return;
   if (idx === undefined) idx = state.selectedShotIdx;
   if (idx === undefined || idx === null) { alert("请先选择一个分镜"); return; }
@@ -803,7 +828,7 @@ function genFirstFrame(idx) {
     persistShotGenerating();
 
   api("/generate-frame", {
-            body: { prompt: prompt, aspect_ratio: "16:9", mode: "first_frame", project_id: state.currentProject ? state.currentProject.project_id : "", shot_idx: idx }
+              body: { prompt: prompt, aspect_ratio: "16:9", mode: "first_frame", project_id: state.currentProject ? state.currentProject.project_id : "", shot_idx: idx, reference_images: await _getReferenceImages() }
           }).then(res => {
                       if (window._batchCancelled) return;
                       if (res.success && res.image_url) {
@@ -813,10 +838,12 @@ function genFirstFrame(idx) {
                       if (firstImg) {
                         firstImg.dataset.shotIdx = idx;
                         if (res.image_url.startsWith("data:")) {
-                          firstImg.innerHTML = '<img src="' + res.image_url + '" class="frame-img" alt="首帧">';
-                        } else {
-                          firstImg.innerHTML = '<img src="/api/image-proxy?url=' + encodeURIComponent(res.image_url) + '" class="frame-img" alt="首帧">';
-                        }
+                                                  firstImg.innerHTML = '<img src="' + res.image_url + '" class="frame-img" alt="首帧">';
+                                                } else if (res.image_url.startsWith("/api/")) {
+                                                  firstImg.innerHTML = '<img src="' + res.image_url + '" class="frame-img" alt="首帧">';
+                                                } else {
+                                                  firstImg.innerHTML = '<img src="/api/image-proxy?url=' + encodeURIComponent(res.image_url) + '" class="frame-img" alt="首帧">';
+                                                }
                       }
                       selectShot(idx);
                                             if (isSingle) {
@@ -845,7 +872,7 @@ function genFirstFrame(idx) {
                               });
                             }
 
-                            function genLastFrame(idx) {
+                            async function genLastFrame(idx) {
                               if (!requireProject()) return;
                               if (idx === undefined) idx = state.selectedShotIdx;
                               if (idx === undefined || idx === null) { alert("请先选择一个分镜"); return; }
@@ -872,7 +899,7 @@ function genFirstFrame(idx) {
                                                       persistShotGenerating();
 
                         api("/generate-frame", {
-                        body: { prompt: prompt, aspect_ratio: "16:9", mode: "last_frame", project_id: state.currentProject ? state.currentProject.project_id : "", shot_idx: idx }
+                                                body: { prompt: prompt, aspect_ratio: "16:9", mode: "last_frame", project_id: state.currentProject ? state.currentProject.project_id : "", shot_idx: idx, reference_images: await _getReferenceImages() }
                       }).then(res => {
                                               if (window._batchCancelled) return;
                                               if (res.success && res.image_url) {
@@ -1077,19 +1104,23 @@ async function batchGenFrames() {
                         const shots = state.currentShots;
                         if (!shots || shots.length === 0) { alert("没有分镜数据"); return; }
 
-                        // 检查每个分镜是否有首尾帧
-                        const missing = [];
-                        for (let i = 0; i < shots.length; i++) {
-                          const shotData = loadShotData(i);
-                          const prevData = i > 0 ? loadShotData(i - 1) : null;
-                          const firstFrame = shotData.firstFrame || shotData.firstFrameUploaded ||
-                            (i > 0 ? (prevData.lastFrame || prevData.lastFrameUploaded) : null);
-                          const lastFrame = shotData.lastFrame || shotData.lastFrameUploaded;
-                          if (!firstFrame) missing.push({ idx: i, type: "首帧" });
-                          if (!lastFrame) missing.push({ idx: i, type: "尾帧" });
-                        }
+                        // 检查每个分镜是否有首尾帧，并统计需要生成视频的分镜
+                                                const missing = [];
+                                                const tasks = [];
+                                                for (let i = 0; i < shots.length; i++) {
+                                                  const shotData = loadShotData(i);
+                                                  // 跳过已有视频的分镜
+                                                  if (shotData && shotData.video) continue;
+                                                  const prevData = i > 0 ? loadShotData(i - 1) : null;
+                                                  const firstFrame = shotData.firstFrame || shotData.firstFrameUploaded ||
+                                                    (i > 0 ? (prevData.lastFrame || prevData.lastFrameUploaded) : null);
+                                                  const lastFrame = shotData.lastFrame || shotData.lastFrameUploaded;
+                                                  if (!firstFrame) missing.push({ idx: i, type: "首帧" });
+                                                  if (!lastFrame) missing.push({ idx: i, type: "尾帧" });
+                                                  tasks.push({ idx: i });
+                                                }
 
-                        if (missing.length > 0) {
+                                                if (missing.length > 0) {
                                                   const msg = missing.map(m => `#${m.idx + 1} ${m.type}`).join("、");
                                                   alert(`缺少首尾帧，无法生成视频：${msg}\n请先生成图片`);
                                                   return;
@@ -1098,28 +1129,27 @@ async function batchGenFrames() {
                                                 // 检查 insMind 可用账号数是否足够
                                                                         let availableAccounts = 0;
                                                                         try {
-                                                                          const acctResp = await fetch("http://localhost:8005/api/accounts/count").then(r => r.json());
+                                                                          const acctResp = await fetch("/api/insmind-accounts/count").then(r => r.json());
                                                                           availableAccounts = acctResp && acctResp.success ? acctResp.success : 0;
                                                                         } catch (e) {
                                                                           // 接口失败，默认允许（不阻塞）
                                                                           availableAccounts = 999;
                                                                         }
-                                                const needed = shots.length;
-                                                if (availableAccounts < needed) {
+                                                const needed = tasks.length;
+                                                                                                if (needed === 0) {
+                                                                                                  alert("所有分镜已有视频，无需生成");
+                                                                                                  return;
+                                                                                                }
+                                                                                                if (availableAccounts < needed) {
                                                   alert(`insMind 可用账号不足：需要 ${needed} 个账号，当前可用 ${availableAccounts} 个\n请先注册新账号或等待额度重置`);
                                                   return;
                                                 }
 
                                                 const btn = document.getElementById("batchVideoBtn");
-                        btn.disabled = true;
-                        btn.textContent = "⏳ 生成中...";
+                                                                        btn.disabled = true;
+                                                                        btn.textContent = "⏳ 生成中...";
 
-                        const tasks = [];
-                        for (let i = 0; i < shots.length; i++) {
-                          tasks.push({ idx: i });
-                        }
-
-                        // 同步提交所有视频生成请求
+                                                                        // 同步提交所有视频生成请求
                         const results = await Promise.allSettled(
                           tasks.map(t => new Promise(resolve => {
                             genShotVideo(t.idx);
@@ -1883,40 +1913,30 @@ async function testLLMConfig() {
       list.innerHTML = chars.map((c, ci) => `
                                 <div class="char-item" data-char-idx="${ci}">
                                   <div class="char-cols">
-                                    <!-- 列一：填写信息生成三视图 -->
+                                    <!-- 列一：上传图片 + 生成三视图 -->
                                     <div class="char-col">
-                                      <div class="char-col-title">✏️ 填写信息生成三视图 <button class="char-del-btn" onclick="deleteCharacter('${c.id}')" title="删除角色">弃</button></div>
-                                      <div class="char-gen-layout">
-                                        <div class="char-gen-fields">
-                                          <input class="char-field char-name-field" value="${escHtml(c.name === "新角色" ? "未命名" : c.name)}" placeholder="未命名" onchange="updateCharField('${c.id}','name',this.value)" onclick="this.select()" title="点击重命名">
-                                          <input class="char-field" value="${escHtml(c.style || "")}" placeholder="风格（如：古装侠客）" onchange="updateCharField('${c.id}','style',this.value)">
-                                          <input class="char-field" value="${escHtml((c.voice && c.voice.tone) || "")}" placeholder="个性（如：活泼）" onchange="updateCharField('${c.id}','personality',this.value)">
+                                      <div class="char-upload-gen-layout">
+                                        <div class="char-upload-area" onclick="uploadCharImage('${c.id}')">
+                                          ${c.uploaded_image
+                                            ? `<img src="${c.uploaded_image}" class="char-upload-img">`
+                                            : '<div class="char-upload-placeholder">+<br>点击上传图片</div>'}
+                                          ${c.uploaded_image ? `<span class="char-clear-btn" onclick="event.stopPropagation();clearUploadedImage('${c.id}')">清空</span>` : ""}
+                                        </div>
+                                        <input type="file" id="charUpload_${c.id}" accept="image/*" style="display:none" onchange="handleCharUpload(event,'${c.id}')">
+                                        <div class="char-gen-btn-area">
                                           <button class="char-gen-btn" onclick="genThreeView('${c.id}')" id="gen3Btn_${c.id}">🖼 生成三视图</button>
                                         </div>
-                                        <div class="char-gen-preview" id="charPreview_${c.id}">
+                                        <div class="char-preview-area" id="charPreview_${c.id}">
                                           ${c.three_view && c.three_view.images && c.three_view.images.length > 0
-                                            ? `<img src="/api/image-proxy?url=${encodeURIComponent(c.three_view.images[0])}" class="char-preview-img">`
+                                                      ? `<img src="${c.three_view.images[0]}" class="char-preview-img">`
                                             : '<div class="char-preview-placeholder">生成后预览</div>'}
                                         </div>
                                       </div>
                                     </div>
-                              <!-- 列二：上传图片 -->
-                              <div class="char-col">
-                                <div class="char-col-title">
-                                  📷 上传角色图片
-                                  ${c.uploaded_image ? `<span class="char-clear-btn" onclick="event.stopPropagation();clearUploadedImage('${c.id}')">清空</span>` : ""}
-                                </div>
-                                <div class="char-upload-box" onclick="uploadCharImage('${c.id}')">
-                                  ${c.uploaded_image
-                                    ? `<img src="${c.uploaded_image}" class="char-upload-img">`
-                                    : '<div class="char-upload-placeholder">+<br>点击上传</div>'}
-                                </div>
-                                <input type="file" id="charUpload_${c.id}" accept="image/*" style="display:none" onchange="handleCharUpload(event,'${c.id}')">
-                              </div>
-                              <!-- 列三：角色提示词 -->
+                              <!-- 列二：角色提示词 -->
                               <div class="char-col char-col-prompt">
-                                <div class="char-col-title">📝 角色提示词</div>
-                                <textarea class="char-prompt-textarea" placeholder="该角色的详细描述，用于生成时保持角色一致性..." onchange="updateCharField('${c.id}','description',this.value)">${escHtml(c.description || "")}</textarea>
+                                <div class="char-col-title"><span class="char-name-display" id="charNameDisplay_${c.id}" onclick="renameCharacter('${c.id}')">${escHtml(c.name)}</span> <button class="char-del-btn" onclick="deleteCharacter('${c.id}')" title="删除角色">弃</button></div>
+                                <textarea class="char-prompt-textarea" placeholder="角色名称、风格、个性、背景等详细描述，用于生成时保持角色一致性..." onchange="updateCharField('${c.id}','description',this.value)">${escHtml(c.description || "")}</textarea>
                               </div>
                             </div>
                           </div>
@@ -2044,14 +2064,16 @@ async function testLLMConfig() {
     if (!char) { alert("角色不存在"); return; }
 
     const desc = [char.style, char.voice && char.voice.tone].filter(Boolean).join("，");
-    const prompt = THREE_VIEW_PROMPT + "\n角色描述：" + (desc || char.name);
-    const btn = document.getElementById("gen3Btn_" + charId);
+        const prompt = THREE_VIEW_PROMPT + "\n角色描述：" + (desc || char.name);
+        // 如果有上传图片，作为参考图
+                const refs = char.uploaded_image ? [char.uploaded_image] : [];
+        const btn = document.getElementById("gen3Btn_" + charId);
     if (!btn) return;
     btn.disabled = true; btn.textContent = "⏳";
 
     try {
       const res = await api("/generate-frame", {
-        body: { prompt: prompt, aspect_ratio: "16:9", mode: "three_view", project_id: state.currentProject.project_id, shot_idx: 0 }
+              body: { prompt: prompt, aspect_ratio: "16:9", mode: "three_view", project_id: state.currentProject.project_id, shot_idx: 0, reference_images: refs }
       });
       if (res.success && res.image_url) {
         const threeViewData = { images: [res.image_url], prompt: prompt };

@@ -229,6 +229,7 @@ class ScriptGenerateRequest(BaseModel):
     word_count: int = 200
     system_prompt_id: str = ""
     custom_prompt: str = ""
+    project_id: str = ""
 
 class GenerationRequest(BaseModel):
     prompt: str
@@ -533,9 +534,38 @@ def analyze_script(req: ScriptGenerateRequest):
     if not topic:
         raise HTTPException(400, "请提供文案内容")
 
+    # 查询当前项目的角色和场景信息
+    char_text = ""
+    scene_text = ""
+    if req.project_id:
+        try:
+            import characters as char_mod
+            import scenes as scene_mod
+            chars = char_mod.list_characters(req.project_id)
+            scenes = scene_mod.list_scenes(req.project_id)
+            if chars:
+                lines = []
+                for c in chars:
+                    desc = c.get("description", "") or c.get("style", "") or ""
+                    lines.append(f"- {c.get('name', '未命名')}" + (f"（{desc}）" if desc else ""))
+                char_text = "当前项目已定义的角色：\n" + "\n".join(lines) + "\n"
+            if scenes:
+                lines = []
+                for s in scenes:
+                    desc = s.get("description", "") or s.get("style", "") or ""
+                    lines.append(f"- {s.get('name', '未命名')}" + (f"：{desc}" if desc else ""))
+                scene_text = "当前项目已定义的场景：\n" + "\n".join(lines) + "\n"
+        except:
+            pass
+
+    extra_context = ""
+    if char_text or scene_text:
+        extra_context = f"\n【项目设定参考】\n{char_text}{scene_text}请根据以上角色和场景设定生成分镜，prompt 中引用角色名称和场景描述。\n\n"
+
     system_prompt = "你是一个专业的视频分镜师和字幕师。根据文案生成分镜表和SRT字幕。\n首帧提示词和尾帧提示词不能与画面提示词重复，要有起始/结束的区分感。"
     user_prompt = (
         f"文案内容：\n{topic}\n\n"
+        f"{extra_context}"
         f"请生成以下内容，以 JSON 格式输出：\n"
         f'{{\n'
         f'  "shots": [\n'
@@ -681,15 +711,23 @@ def update_character(char_id: str, req: CharacterRequest):
     """修改角色"""
     if not req.project_id:
         raise HTTPException(400, "请指定项目")
-    result = chars_mod.update_character(req.project_id, char_id, {
-                "name": req.name,
-                "style": req.style,
-                "voice": req.voice,
-                "reference_image": req.reference_image,
-                "description": req.description,
-                "three_view": req.three_view,
-                "uploaded_image": req.uploaded_image,
-            })
+    updates = {
+        "name": req.name,
+        "style": req.style,
+        "voice": req.voice,
+        "reference_image": req.reference_image,
+        "description": req.description,
+        "three_view": req.three_view,
+        "uploaded_image": req.uploaded_image,
+    }
+    # 如果上传了 data URL 图片，保存到项目文件夹
+    if req.uploaded_image and req.uploaded_image.startswith("data:"):
+        local_path = _save_data_url_to_project(req.project_id, "图片", req.uploaded_image, f"char_{char_id}")
+        if local_path:
+            rel_path = os.path.relpath(local_path, str(PROJECT_CONTENT_DIR))
+            rel_parts = rel_path.replace("\\", "/").split("/")
+            updates["uploaded_image"] = f"/api/project-files/{rel_parts[0]}/{rel_parts[1]}/{rel_parts[2]}"
+    result = chars_mod.update_character(req.project_id, char_id, updates)
     if not result:
         raise HTTPException(404, "角色不存在")
     return result
@@ -744,12 +782,20 @@ def update_scene(scene_id: str, req: SceneRequest):
     """修改场景"""
     if not req.project_id:
         raise HTTPException(400, "请指定项目")
-    result = scenes_mod.update_scene(req.project_id, scene_id, {
+    updates = {
         "name": req.name,
         "style": req.style,
         "description": req.description,
         "uploaded_image": req.uploaded_image,
-    })
+    }
+    # 如果上传了 data URL 图片，保存到项目文件夹
+    if req.uploaded_image and req.uploaded_image.startswith("data:"):
+        local_path = _save_data_url_to_project(req.project_id, "图片", req.uploaded_image, f"scene_{scene_id}")
+        if local_path:
+            rel_path = os.path.relpath(local_path, str(PROJECT_CONTENT_DIR))
+            rel_parts = rel_path.replace("\\", "/").split("/")
+            updates["uploaded_image"] = f"/api/project-files/{rel_parts[0]}/{rel_parts[1]}/{rel_parts[2]}"
+    result = scenes_mod.update_scene(req.project_id, scene_id, updates)
     if not result:
         raise HTTPException(404, "场景不存在")
     return result
@@ -1265,6 +1311,7 @@ def generate_frame(req: FrameGenRequest):
     if not req.prompt:
         raise HTTPException(400, "prompt 不能为空")
     try:
+        data = {}
         payload = {
             "prompt": req.prompt,
             "aspect_ratio": req.aspect_ratio,
@@ -1274,24 +1321,45 @@ def generate_frame(req: FrameGenRequest):
         }
         # 如果有参考图，传给 photogpt
         if req.reference_images:
-            payload["reference_images"] = req.reference_images
+            # 本地路径转 data URL（外部 API 无法访问本地路径）
+            input_urls = []
+            for ref in req.reference_images:
+                if ref.startswith("/api/project-files/"):
+                    # 本地路径 → 读文件转 data URL
+                    parts = ref.replace("/api/project-files/", "").split("/")
+                    if len(parts) >= 3:
+                        fpath = PROJECT_CONTENT_DIR / parts[0] / parts[1] / parts[2]
+                        if fpath.exists():
+                            import base64, mimetypes
+                            mime, _ = mimetypes.guess_type(str(fpath))
+                            b64 = base64.b64encode(fpath.read_bytes()).decode()
+                            input_urls.append(f"data:{mime or 'image/png'};base64,{b64}")
+                        else:
+                            input_urls.append(ref)
+                    else:
+                        input_urls.append(ref)
+                else:
+                    input_urls.append(ref)
+            payload["input_urls"] = input_urls
         resp = _httpx.post(
                     f"http://localhost:8005/api/photogpt/generate",
                     json=payload,
-                    timeout=30, trust_env=False,
+                    timeout=120,
                 )
         data = resp.json()
         if data.get("success"):
             job_id = data["job_id"]
             image_url = _poll_photogpt_result(job_id)
             if image_url:
-                # 下载到项目本地缓存
+                # 下载到项目本地缓存，返回本地路径
                 if req.project_id:
                     local_path = _download_to_project(req.project_id, "图片", image_url, f"shot_{req.shot_idx}_{req.mode}")
                     if local_path:
-                        image_url = f"/api/image-proxy?url={image_url}"
+                        # 转为本地项目文件路径
+                        rel_path = os.path.relpath(local_path, str(PROJECT_CONTENT_DIR))
+                        rel_parts = rel_path.replace("\\", "/").split("/")
+                        image_url = f"/api/project-files/{rel_parts[0]}/{rel_parts[1]}/{rel_parts[2]}"
                 return {"success": True, "image_url": image_url, "job_id": job_id}
-            return {"success": False, "error": "图片生成超时", "job_id": job_id}
         return {"success": False, "error": data.get("error", "提交失败")}
     except _httpx.ConnectError:
         raise HTTPException(502, "无法连接 PhotoGPT 后端 (localhost:8005)")
@@ -1368,21 +1436,39 @@ async def generate_video(req: VideoGenRequest):
         if err_msg:
             return {"success": False, "error": err_msg, "job_id": job_id}
         if video_url:
-            # 下载视频到项目文件夹
+            # 下载视频到项目文件夹，返回本地路径
             local_path = ""
             if req.project_id:
                 try:
                     local_path = _download_to_project(req.project_id, "视频", video_url, f"shot_{req.shot_idx}")
                     if local_path:
-                        video_url = f"/api/video-proxy?url={video_url}"
+                        rel_path = os.path.relpath(local_path, str(PROJECT_CONTENT_DIR))
+                        rel_parts = rel_path.replace("\\", "/").split("/")
+                        video_url = f"/api/project-files/{rel_parts[0]}/{rel_parts[1]}/{rel_parts[2]}"
                 except Exception as e:
                     print(f"视频下载到本地失败: {e}")
             return {"success": True, "video_url": video_url, "local_path": local_path, "job_id": job_id}
-        return {"success": False, "error": "视频生成超时", "job_id": job_id}
     except _httpx.ConnectError:
         raise HTTPException(502, "无法连接视频生成后端 (localhost:8005)")
     except Exception as e:
         raise HTTPException(502, f"视频生成失败: {e}")
+
+
+@app.get("/api/insmind-accounts/count")
+async def insmind_accounts_count():
+            """查询 insMind 可用账号数"""
+            import sqlite3
+            try:
+                db_path = r"E:\视频生成\dreamina-auto-register-main\backend\data\dreamina.db"
+                conn = sqlite3.connect(db_path)
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM insmind_accounts WHERE status='active' AND token IS NOT NULL AND token != ''")
+                count = cur.fetchone()[0]
+                conn.close()
+                return {"success": count, "total": count}
+            except Exception as e:
+                print(f"查询 insmind 账号数失败: {e}")
+                return {"success": 0, "total": 0, "error": str(e)}
 
 
 def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix: str) -> str:
@@ -1417,6 +1503,42 @@ def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix
     except Exception as e:
         print(f"下载异常: {e}")
     return ""
+
+
+def _save_data_url_to_project(project_id: str, subdir: str, data_url: str, filename_prefix: str) -> str:
+    """保存 data URL 图片到项目文件夹，返回本地路径"""
+    import base64
+    proj_dir = PROJECT_CONTENT_DIR / project_id / subdir
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    # 解析 data URL 格式: data:image/png;base64,xxxx
+    ext = ".png"
+    if "," in data_url:
+        header = data_url.split(",")[0]
+        if "png" in header:
+            ext = ".png"
+        elif "jpeg" in header or "jpg" in header:
+            ext = ".jpg"
+        elif "webp" in header:
+            ext = ".webp"
+        elif "gif" in header:
+            ext = ".gif"
+        b64_data = data_url.split(",")[1]
+    else:
+        return ""
+    local_file = proj_dir / f"{filename_prefix}{ext}"
+    try:
+        img_data = base64.b64decode(b64_data)
+        tmp_file = local_file.with_suffix(".tmp" + ext)
+        tmp_file.write_bytes(img_data)
+        if tmp_file.exists():
+            if local_file.exists():
+                local_file.unlink()
+            tmp_file.rename(local_file)
+        return str(local_file)
+    except Exception as e:
+        print(f"保存 data URL 异常: {e}")
+        return ""
+
 
 
 async def _poll_video_result_async(job_id: int, max_poll: int = 10) -> tuple:

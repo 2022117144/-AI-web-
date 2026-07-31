@@ -3,7 +3,7 @@
 ====================
 角色 CRUD，支持多项目隔离。
 每个项目可定义多个角色（名称/风格/音色/参考图）。
-数据存储在 ./data/characters/ 目录下。
+数据存储在 ./data/project_content/ 目录下，每个项目一个 JSON 文件。
 """
 
 import json, uuid
@@ -11,11 +11,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-CHARACTERS_DIR = Path(__file__).parent / "data" / "characters"
+PROJECT_CONTENT_DIR = Path(__file__).parent / "data" / "project_content"
 
 def _project_path(project_id: str) -> Path:
-    CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
-    return CHARACTERS_DIR / f"{project_id}.json"
+    PROJECT_CONTENT_DIR.mkdir(parents=True, exist_ok=True)
+    return PROJECT_CONTENT_DIR / project_id / "characters.json"
 
 def _load(project_id: str) -> List[Dict[str, Any]]:
     p = _project_path(project_id)

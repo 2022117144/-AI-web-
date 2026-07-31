@@ -1181,13 +1181,23 @@ select:focus, input:focus { border-color: var(--accent); }
 .char-list { display: flex; flex-direction: column; gap: 8px; }
 .char-item { background: var(--bg-body); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; margin-bottom: 8px; }
 .char-name-row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-bottom: 10px; }
-.char-item-name { font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }
-.char-item-name:hover { color: var(--accent); text-decoration: underline dotted; }
-.char-del-btn { background: transparent; border: 1px solid #c4a882; border-radius: 3px; cursor: pointer; font-size: 13px; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; color: #c4a882; transition: all 0.15s; font-family: "KaiTi", "STKaiti", "楷体", serif; }
+.char-name-display { font-family: '楷体', 'KaiTi', serif; font-weight: bold; font-size: 22px; cursor: pointer; color: var(--text); }
+.char-name-display:hover { color: var(--accent); text-decoration: underline dotted; }
+.char-del-btn { background: transparent; border: 1px solid #c4a882; border-radius: 3px; cursor: pointer; font-size: 22px; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; color: #c4a882; transition: all 0.15s; font-family: "KaiTi", "STKaiti", "楷体", serif; }
 .char-del-btn:hover { color: #8b6b4a; border-color: #8b6b4a; background: rgba(196,168,130,0.1); }
 .char-cols { display: flex; gap: 10px; width: 100%; }
 .char-col { flex: 1; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; background: var(--bg-card); display: flex; flex-direction: column; gap: 8px; min-width: 0; width: 0; }
 .char-col-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
+.char-upload-gen-layout { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr auto; gap: 8px; flex: 1; min-height: 200px; }
+.char-upload-area { grid-column: 1; grid-row: 1 / 3; border: 2px dashed var(--border); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; background: var(--bg-body); position: relative; min-height: 180px; }
+.char-upload-area:hover { border-color: var(--accent); }
+.char-upload-area .char-clear-btn { position: absolute; top: 4px; right: 4px; font-size: 11px; color: var(--red); cursor: pointer; background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 3px; }
+.char-upload-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.char-upload-placeholder { color: var(--text-muted); font-size: 24px; text-align: center; line-height: 1.4; }
+.char-gen-btn-area { grid-column: 1; grid-row: 3; display: flex; align-items: center; }
+.char-preview-area { grid-column: 2; grid-row: 1 / 4; border: 1px solid var(--border); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--bg-body); min-height: 180px; }
+.char-preview-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.char-preview-placeholder { color: var(--text-muted); font-size: 12px; text-align: center; padding: 8px; }
 .char-gen-layout { display: flex; gap: 8px; flex: 1; }
 .char-gen-fields { flex: 1; display: flex; flex-direction: column; gap: 5px; }
 .char-gen-preview { flex: 1; min-height: 120px; border: 1px dashed var(--border); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--bg-body); }
@@ -1199,7 +1209,7 @@ select:focus, input:focus { border-color: var(--accent); }
 .char-upload-placeholder { font-size: 14px; color: var(--text-muted); text-align: center; line-height: 1.4; }
 .char-clear-btn { font-size: 10px; color: var(--red); cursor: pointer; margin-left: 6px; text-decoration: underline dotted; }
 .char-clear-btn:hover { color: #c0392b; }
-.char-col-prompt { flex: 1.2; }
+.char-col-prompt { }
 .char-prompt-textarea { flex: 1; min-height: 100px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-body); color: var(--text); font-size: 12px; resize: vertical; font-family: inherit; }
 .char-field { padding: 5px 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-body); color: var(--text); font-size: 12px; width: 100%; box-sizing: border-box; }
 .char-name-field { font-weight: 600; font-size: 13px; text-align: center; }

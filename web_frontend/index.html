@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=1280">
-<title>万象AI V7.4.8</title>
+<title>万象AI V7.5</title>
 <style>
 :root{--bg:#1e1e1e;--bg2:#252526;--bg3:#2d2d30;--text:#e0e0e0;--text2:#999;--border:#454545}
 *{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft YaHei","PingFang SC",sans-serif}
@@ -39,7 +39,7 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
 <body>
 <div class="app">
   <div class="title-bar">
-    <div class="icon">🪄</div><div class="title">万象AI V7.4.8<span>免费用户</span></div>
+    <div class="icon">🪄</div><div class="title">万象AI V7.5</div>
     <div class="spacer"></div>
     <button class="win-btn">一</button><button class="win-btn">口</button><button class="win-btn close">✕</button>
   </div>
@@ -50,7 +50,8 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
       <button class="wx-nav-btn" data-wx="tools"><span class="icon">🛠️</span> 创作工具</button>
       <button class="wx-nav-btn" data-wx="copy"><span class="icon">📝</span> 文案</button>
       <button class="wx-nav-btn" data-wx="shots"><span class="icon">🎬</span> 分镜</button>
-      <button class="wx-nav-btn" data-wx="pipeline"><span class="icon">⚙️</span> 流水线</button>
+            <button class="wx-nav-btn" data-wx="storyboard"><span class="icon">📋</span> 分镜表</button>
+            <button class="wx-nav-btn" data-wx="pipeline"><span class="icon">⚙️</span> 流水线</button>
       <button class="wx-nav-btn" data-wx="aitools"><span class="icon">📦</span> AI工具箱</button>
       <div class="wx-nav-sep"></div>
       <div class="wx-nav-bottom">
@@ -125,10 +126,53 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
               <iframe class="zc-iframe" src="/zc/?tab=script&v=2"></iframe>
             </div>
             <div class="wx-page iframe-page" id="wx-shots">
-              <div class="proj-select-bar"><span class="ps-label">📁 项目</span><select class="ps-select" id="psShots" onchange="onPsChange('shots',this.value)"><option value="">— 选择项目 —</option></select></div>
-              <iframe class="zc-iframe" src="/zc/?tab=shots&v=2"></iframe>
-            </div>
-            <div class="wx-page iframe-page" id="wx-pipeline">
+                          <div class="proj-select-bar"><span class="ps-label">📁 项目</span><select class="ps-select" id="psShots" onchange="onPsChange('shots',this.value)"><option value="">— 选择项目 —</option></select></div>
+                          <iframe class="zc-iframe" src="/zc/?tab=shots&v=2"></iframe>
+                        </div>
+                        <!-- 分镜表 -->
+                        <div class="wx-page" id="wx-storyboard">
+                          <div style="display:flex;flex:1;min-height:0;overflow:hidden">
+                            <div class="sb-main" id="sbMain">
+                              <div class="sb-toolbar">
+                                <span class="sb-title">📋 分镜表</span>
+                                <button class="wx-btn" onclick="sbAddShot()" style="background:#007acc;color:#fff;border-color:#007acc;padding:4px 12px">＋ 添加镜头</button>
+                                <button class="wx-btn" onclick="sbBatchGen()" style="padding:4px 12px">批量生成</button>
+                                <button class="wx-btn" id="sbImportBtn" onclick="sbImportScript()" style="padding:4px 12px">导入文案</button>
+                                <div style="flex:1"></div>
+                                <span class="sb-count" id="sbCount">0 个镜头</span>
+                              </div>
+                              <div class="sb-table-wrap">
+                                <table class="sb-table" id="sbTable">
+                                  <thead>
+                                    <tr>
+                                      <th class="sb-col-idx" style="text-align:center">序号</th>
+                                      <th class="sb-col-script" style="text-align:center">剧本</th>
+                                      <th class="sb-col-asset" style="text-align:center">出场人物</th>
+                                      <th class="sb-col-asset" style="text-align:center">场景</th>
+                                      <th class="sb-col-asset" style="text-align:center">道具</th>
+                                      <th class="sb-col-action" style="text-align:center">配音</th>
+                                                                <th class="sb-col-frame" style="text-align:center">首帧</th>
+                                                                <th class="sb-col-frame" style="text-align:center">尾帧</th>
+                                                                <th class="sb-col-action" style="text-align:center">视频</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody id="sbBody">
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                            <div class="sb-scene-panel" id="sbScenePanel">
+                              <div class="sb-scene-header">
+                                <span>全部可用场景</span>
+                                <button class="wx-btn" onclick="sbAddScene()" style="padding:2px 8px;font-size:11px">＋</button>
+                              </div>
+                              <div class="sb-scene-list" id="sbSceneList">
+                                <div class="sb-scene-empty">暂无场景</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div class="wx-page iframe-page" id="wx-pipeline">
               <div class="proj-select-bar"><span class="ps-label">📁 项目</span><select class="ps-select" id="psPipeline" onchange="onPsChange('pipeline',this.value)"><option value="">— 选择项目 —</option></select></div>
               <iframe class="zc-iframe" src="/zc/?tab=pipeline&v=2"></iframe>
             </div>
@@ -182,6 +226,7 @@ var t=document.getElementById('wx-'+this.dataset.wx);
 if(t)t.classList.add('active');
 if (this.dataset.wx === 'batch') loadProjects();
 if (this.dataset.wx === 'logs') refreshLogs();
+if (this.dataset.wx === 'storyboard') { sbCurrentProject = localStorage.getItem('wx_selected_project') || ''; loadSbData(); sbRender(); }
 saveCurrentPage();
 })});
 restoreLastPage();
@@ -488,6 +533,184 @@ if (savedProj) {
 }
 // 不管有没有保存的项目，都拉一次列表
 loadProjectSelectors(savedProj || undefined);
+
+// ====== 分镜表 ======
+var sbShots = [];
+
+function sbRender() {
+  var tbody = document.getElementById('sbBody');
+  document.getElementById('sbCount').textContent = sbShots.length + ' 个镜头';
+  if (sbShots.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" class="sb-empty">暂无镜头，点击「添加镜头」开始</td></tr>';
+    return;
+  }
+  tbody.innerHTML = sbShots.map(function(s, i){
+      var idx = i + 1;
+            var delBtn = '<button class="sb-icon-btn sb-del" onclick="sbDeleteShot('+i+')" title="删除">🗑️</button>';
+            var downBtn = '<button class="sb-icon-btn sb-down" onclick="sbMoveDown('+i+')" title="下移">▼</button>';
+            
+            
+            var firstStatus = sbGenStatus[i] && sbGenStatus[i].first === 'loading' ? '<span class="sb-gen-status loading">⏳</span>' : (sbGenStatus[i] && sbGenStatus[i].first === 'done' ? '<span class="sb-gen-status done">✅</span>' : '');
+            var lastStatus = sbGenStatus[i] && sbGenStatus[i].last === 'loading' ? '<span class="sb-gen-status loading">⏳</span>' : (sbGenStatus[i] && sbGenStatus[i].last === 'done' ? '<span class="sb-gen-status done">✅</span>' : '');
+            var videoStatus = sbGenStatus[i] && sbGenStatus[i].video === 'loading' ? '<span class="sb-gen-status loading">⏳</span>' : (sbGenStatus[i] && sbGenStatus[i].video === 'done' ? '<span class="sb-gen-status done">✅</span>' : '');
+            var voiceStatus = sbGenStatus[i] && sbGenStatus[i].voice === 'loading' ? '<span class="sb-gen-status loading">⏳</span>' : (sbGenStatus[i] && sbGenStatus[i].voice === 'done' ? '<span class="sb-gen-status done">✅</span>' : '');
+            return '<tr>' +
+              '<td class="sb-col-idx">' +
+                '<div class="sb-idx-wrap">' +
+                  '<div class="sb-idx">' + idx + '</div>' +
+                  '<div class="sb-idx-del">' + delBtn + '</div>' +
+                  
+                  '<div class="sb-idx-down">' + downBtn + '</div>' +
+                '</div>' +
+              '</td>' +
+              '<td class="sb-col-script">' +
+                '<div class="sb-script-text" contenteditable="true" oninput="sbShots[' + i + '].script=this.innerText" placeholder="(台词/动作描述)">' + (s.script || '') + '</div>' +
+                '<div class="sb-script-prompt" contenteditable="true" oninput="sbShots[' + i + '].prompt=this.innerText" placeholder="PROMPT: 画面描述，比例16:9...">' + (s.prompt || '') + '</div>' +
+              '</td>' +
+      '<td class="sb-col-asset"><div class="sb-asset-box" onclick="sbPickAsset(' + i + ',\'character\')">' + (s.character ? '<img src="'+s.character+'" class="sb-asset-img">' : '<div class="sb-asset-add">+</div>') + '</div></td>' +
+      '<td class="sb-col-asset"><div class="sb-asset-box" onclick="sbPickAsset(' + i + ',\'scene\')">' + (s.scene ? '<img src="'+s.scene+'" class="sb-asset-img">' : '<div class="sb-asset-add">+</div>') + '</div></td>' +
+      '<td class="sb-col-asset"><div class="sb-asset-box" onclick="sbPickAsset(' + i + ',\'prop\')">' + (s.prop ? '<img src="'+s.prop+'" class="sb-asset-img">' : '<div class="sb-asset-add">+</div>') + '</div></td>' +
+      '<td class="sb-col-action"><button class="sb-btn" onclick="sbGenVoice(' + i + ')">🎤 配音</button></td>' +
+            '<td class="sb-col-frame">' +
+'<div class="sb-frame-cell">' +
+'<div class="sb-frame-btns">' +
+'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbGenFirstFrame(' + i + ')">首<br>帧</button>' +
+'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbUploadFrame(' + i + ', \'first\')">上<br>传</button>' +
+'</div>' +
+'<div class="sb-frame-preview">' +
+'<div class="sb-frame-img" id="sbFirstImg_' + i + '">' + (s.firstFrame ? '<img src="'+s.firstFrame+'" class="sb-frame-thumb">' : '<div class="sb-frame-placeholder">待生成</div>') + '</div>' +
+'</div>' +
+'</div>' +
+'</td>' +
+            '<td class="sb-col-frame">' +
+'<div class="sb-frame-cell">' +
+'<div class="sb-frame-btns">' +
+'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbGenLastFrame(' + i + ')">尾<br>帧</button>' +
+'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbUploadFrame(' + i + ', \'last\')">上<br>传</button>' +
+'</div>' +
+'<div class="sb-frame-preview">' +
+'<div class="sb-frame-img" id="sbLastImg_' + i + '">' + (s.lastFrame ? '<img src="'+s.lastFrame+'" class="sb-frame-thumb">' : '<div class="sb-frame-placeholder">待生成</div>') + '</div>' +
+'</div>' +
+'</div>' +
+'</td>' +
+            '<td class="sb-col-action"><button class="sb-btn" onclick="sbGenVideo(' + i + ')">▶ 生成</button></td>' +
+    '</tr>';
+      }).join('');
+}
+
+var sbGenStatus = {};
+var sbCurrentProject = localStorage.getItem('wx_selected_project') || '';
+
+function saveSbData() {
+  try {
+    var key = 'sb_data_' + (sbCurrentProject || '_default');
+    localStorage.setItem(key, JSON.stringify({shots:sbShots, status:sbGenStatus}));
+  } catch(e) {}
+}
+
+function loadSbData() {
+  try {
+    var key = 'sb_data_' + (sbCurrentProject || '_default');
+    var data = JSON.parse(localStorage.getItem(key) || 'null');
+    if (data && data.shots) { sbShots = data.shots; sbGenStatus = data.status || {}; }
+    
+  } catch(e) {}
+}
+
+function sbAddShot() {
+  sbShots.push({script:'', prompt:'', character:'', scene:'', prop:''});
+  sbRender();
+  // 滚动到底部
+  var wrap = document.querySelector('.sb-table-wrap');
+  if (wrap) wrap.scrollTop = wrap.scrollHeight;
+}
+
+function sbDeleteShot(i) {
+  sbShots.splice(i, 1);
+  sbRender();
+}
+
+function sbMoveUp(i) {
+  if (i <= 0) return;
+  var tmp = sbShots[i];
+  sbShots[i] = sbShots[i-1];
+  sbShots[i-1] = tmp;
+  sbRender();
+}
+
+function sbMoveDown(i) {
+  if (i >= sbShots.length - 1) return;
+  var tmp = sbShots[i];
+  sbShots[i] = sbShots[i+1];
+  sbShots[i+1] = tmp;
+  sbRender();
+}
+
+function sbPickAsset(i, type) {
+  // 简单实现：弹出文件选择器
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      sbShots[i][type] = ev.target.result;
+      sbRender();
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+function sbGenVoice(i) { alert('配音生成功能待接入'); }
+function sbGenFirstFrame(i) { alert('首帧生成功能待接入'); }
+function sbGenLastFrame(i) { alert('尾帧生成功能待接入'); }
+function sbGenVideo(i) { alert('视频生成功能待接入'); }
+function sbBatchGen() { alert('批量生成功能待接入'); }
+function sbImportScript() { alert('导入文案功能待接入'); }
+
+function sbUploadFrame(i, type) {
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      if (type === 'first') sbShots[i].firstFrame = ev.target.result;
+      else sbShots[i].lastFrame = ev.target.result;
+      sbRender();
+      saveSbData();
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+function sbAddScene() {
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var list = document.getElementById('sbSceneList');
+      var empty = list.querySelector('.sb-scene-empty');
+      if (empty) empty.remove();
+      var div = document.createElement('div');
+      div.className = 'sb-scene-item';
+      div.innerHTML = '<img src="'+ev.target.result+'" class="sb-scene-thumb">';
+      list.appendChild(div);
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
 </script>
 
 <!-- 重命名弹窗 -->
@@ -525,6 +748,78 @@ loadProjectSelectors(savedProj || undefined);
 .proj-select-bar .ps-select{flex:1;max-width:300px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;cursor:pointer}
 .proj-select-bar .ps-select:hover{border-color:#007acc}
 .proj-select-bar .ps-select option{background:var(--bg);color:var(--text)}
+/* ====== 分镜表 ====== */
+.sb-main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.sb-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0}
+.sb-title{font-size:14px;font-weight:600;color:var(--text)}
+.sb-count{font-size:11px;color:var(--text2);white-space:nowrap}
+.sb-table-wrap{flex:1;overflow-y:auto;overflow-x:auto}
+.sb-table{width:100%;border-collapse:collapse;table-layout:fixed;min-width:900px}
+.sb-table thead{position:sticky;top:0;z-index:1}
+.sb-table th{padding:4px 4px;font-size:10px;color:var(--text2);font-weight:600;text-align:left;background:var(--bg3);border-bottom:1px solid var(--border);white-space:nowrap}
+.sb-col-idx{width:40px;text-align:center}
+.sb-col-script{width:auto;min-width:180px;max-width:320px}
+.sb-col-asset{width:85px;text-align:center}
+.sb-col-action{width:80px;text-align:center}
+.sb-col-frame{width:130px;text-align:center;height:1px}
+.sb-table td{padding:3px 4px;vertical-align:top;border-bottom:1px solid var(--border);background:var(--bg)}
+.sb-table th:not(:first-child), .sb-table td:not(:first-child){border-left:1px solid #555}
+.sb-empty{padding:40px;text-align:center;color:var(--text2);font-size:13px}
+.sb-idx{width:24px;height:24px;border-radius:50%;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text);margin:0 auto;flex-shrink:0}
+.sb-idx-wrap{display:flex;flex-direction:column;align-items:center;gap:2px}
+.sb-idx-down{margin-top:1px}
+.sb-idx-del{margin:1px 0}
+.sb-icon-btn.sb-down{width:18px;height:18px;border:1px solid var(--border);border-radius:2px;background:var(--bg2);color:var(--text2);font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.sb-icon-btn.sb-down:hover{border-color:#007acc;color:var(--text)}
+.sb-icon-btn.sb-del{width:16px;height:16px;border:1px solid transparent;border-radius:2px;background:transparent;color:var(--text2);font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1}
+.sb-icon-btn.sb-del:hover{border-color:#e74c3c;color:#e74c3c}
+.sb-gen-status{font-size:10px;margin-right:2px;display:inline-block}
+.sb-gen-status.loading{animation:sbPulse 1s infinite}
+.sb-gen-status.done{color:#2ecc71}
+@keyframes sbPulse{0%{opacity:0.5}50%{opacity:1}100%{opacity:0.5}}
+.sb-btn-loading{opacity:0.6;cursor:not-allowed!important}
+.sb-script-text:empty:before{content:attr(placeholder);color:var(--text2);opacity:0.4}
+.sb-script-prompt:empty:before{content:attr(placeholder);color:var(--text2);opacity:0.4}
+.sb-script-text{font-size:11px;color:var(--text);line-height:1.4;padding:2px 4px;border:1px solid transparent;border-radius:2px;outline:none;min-height:18px;cursor:text}
+.sb-script-text:focus{border-color:#007acc;background:var(--bg2)}
+.sb-script-prompt{font-size:10px;color:var(--text2);line-height:1.4;padding:2px 4px;border:1px solid transparent;border-radius:2px;outline:none;min-height:16px;cursor:text;margin-top:1px}
+.sb-script-prompt:focus{border-color:#555;background:var(--bg2)}
+.sb-script-prompt:empty:before{content:attr(placeholder);color:var(--text2);opacity:0.5}
+.sb-asset-box{width:48px;height:48px;border:1px dashed var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;margin:0 auto;overflow:hidden;background:var(--bg2)}
+.sb-asset-box:hover{border-color:#007acc}
+.sb-asset-add{font-size:20px;color:var(--text2);line-height:1}
+.sb-asset-img{width:100%;height:100%;object-fit:cover}
+.sb-btn{width:100%;padding:3px 0;border:1px solid var(--border);border-radius:3px;background:var(--bg2);color:var(--text);font-size:10px;cursor:pointer;white-space:nowrap}
+.sb-btn:hover{border-color:#007acc;color:#007acc}
+
+.sb-icon-btn{width:24px;height:24px;border:1px solid var(--border);border-radius:3px;background:var(--bg2);color:var(--text2);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.sb-icon-btn:hover{border-color:#007acc;color:var(--text)}
+.sb-icon-btn.sb-del:hover{border-color:#e74c3c;color:#e74c3c}
+.sb-gen-status{font-size:10px;margin-right:2px;display:inline-block}
+.sb-gen-status.loading{animation:sbPulse 1s infinite}
+.sb-gen-status.done{color:#2ecc71}
+@keyframes sbPulse{0%{opacity:0.5}50%{opacity:1}100%{opacity:0.5}}
+.sb-btn-loading{opacity:0.6;cursor:not-allowed!important}
+.sb-script-text:empty:before{content:attr(placeholder);color:var(--text2);opacity:0.4}
+.sb-script-prompt:empty:before{content:attr(placeholder);color:var(--text2);opacity:0.4}
+/* 右侧场景库 */
+.sb-scene-panel{width:80px;min-width:80px;background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sb-scene-header{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;font-size:11px;color:var(--text2);font-weight:600;border-bottom:1px solid var(--border);flex-shrink:0}
+.sb-scene-list{flex:1;overflow-y:auto;padding:4px;display:flex;flex-direction:column;gap:4px}
+.sb-scene-empty{padding:16px 4px;text-align:center;font-size:11px;color:var(--text2)}
+.sb-scene-item{cursor:pointer;border:1px solid var(--border);border-radius:4px;overflow:hidden}
+.sb-scene-item:hover{border-color:#007acc}
+.sb-scene-thumb{width:100%;height:40px;object-fit:cover;display:block}
+/* 首尾帧列 */
+.sb-frame-cell{display:flex;gap:4px;height:100%;min-height:0;align-items:stretch}
+.sb-frame-btns{display:flex;flex-direction:column;gap:0;width:18px;min-width:18px;max-width:18px;flex-shrink:0;flex:1}
+.sb-btn-sm{width:100%;flex:1;padding:0;border:1px solid var(--border);border-radius:2px;background:var(--bg2);color:var(--text);font-size:8px;cursor:pointer;white-space:nowrap;line-height:1.2;display:flex;align-items:center;justify-content:center}
+.sb-btn-sm:hover{border-color:#007acc}
+.sb-frame-preview{flex:1;min-width:0;display:flex;align-items:center;justify-content:center}
+.sb-frame-img{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.sb-frame-img img{max-width:100%;max-height:100%;object-fit:contain}
+.sb-frame-placeholder{font-size:9px;color:var(--text2);text-align:center}
+.sb-frame-thumb{max-width:100%;max-height:100%;object-fit:contain;border-radius:2px}
 </style>
 </body>
 </html>
