@@ -100,15 +100,14 @@ body{background:var(--bg)}
           <option value="科普">科普</option>
           <option value="悬疑">悬疑</option>
         </select>
-        <select id="promptSelector" class="sel-sm" onchange="onPromptChange()" title="系统提示词风格" style="min-width:120px">
-          <option value="builtin_general">通用叙事</option>
+        <select id="visualStyleSelector" class="sel-sm" onchange="onVisualStyleChange()" title="视觉风格预设" style="min-width:140px">
+          <option value="">— 不指定风格 —</option>
         </select>
-        <button class="btn btn-sm btn-outline" onclick="showPromptModal()" title="管理提示词" style="font-size:11px">✎</button>
         <input id="scriptWordCount" class="inp-sm" type="text" inputmode="numeric" value="" min="0" max="1000" style="width:60px" placeholder="字数" autocomplete="off">
         <span id="charCount" style="font-size:11px;color:var(--text-muted);margin-left:6px;white-space:nowrap">0 字</span>
         <button class="btn btn-sm btn-outline" onclick="generateScript()" style="display:none" id="dummyBtn"></button>
       </div>
-      <div class="prompt-preview-bar" id="promptPreview">选择一种风格，AI 将按此风格生成文案</div>
+      <div class="prompt-preview-bar" id="stylePreview">选择一种视觉风格，AI 将按此风格生成画面</div>
       <textarea id="storyInput" class="editor" placeholder="AI 生成的文案会出现在这里，你也可以手动修改..." spellcheck="false"></textarea>
       <form autocomplete="off" style="display:contents">
         <div class="script-modify-bar">
@@ -394,5 +393,56 @@ body{background:var(--bg)}
 </div>
 
 <script src="js/app.js?v=4"></script>
+<script>
+// 视觉风格预设
+var visualStyles = [];
+var selectedVisualStyle = null;
+
+function loadVisualStyles() {
+  var sel = document.getElementById('visualStyleSelector');
+  if (!sel) return;
+  fetch('/api/styles').then(function(r) { return r.json(); }).then(function(styles) {
+    visualStyles = styles;
+    // 保留第一个选项（不指定风格）
+    sel.innerHTML = '<option value="">— 不指定风格 —</option>';
+    styles.forEach(function(s) {
+      var opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.name;
+      sel.appendChild(opt);
+    });
+  }).catch(function(e) {
+    console.warn('加载视觉风格预设失败:', e);
+  });
+}
+
+function onVisualStyleChange() {
+  var sel = document.getElementById('visualStyleSelector');
+  var preview = document.getElementById('stylePreview');
+  if (!sel || !preview) return;
+  var id = sel.value;
+  if (!id) {
+    selectedVisualStyle = null;
+    preview.textContent = '选择一种视觉风格，AI 将按此风格生成画面';
+    return;
+  }
+  var found = null;
+  for (var i = 0; i < visualStyles.length; i++) {
+    if (visualStyles[i].id === id) { found = visualStyles[i]; break; }
+  }
+  if (found) {
+    selectedVisualStyle = found;
+    var desc = found.video_anchor || '';
+    preview.textContent = '🎨 ' + found.name + ' — ' + (desc.length > 80 ? desc.slice(0, 80) + '...' : desc);
+  }
+}
+
+// 页面加载后加载风格列表
+if (document.readyState === 'complete') {
+  loadVisualStyles();
+} else {
+  window.addEventListener('load', loadVisualStyles);
+}
+</script>
 </body>
 </html>

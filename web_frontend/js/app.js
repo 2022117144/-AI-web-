@@ -529,11 +529,15 @@ async function analyzeScript() {
   btn.disabled = true; btn.textContent = "⏳ 分析中...";
 
   try {
-    // 创建异步任务
-    const task = await api("/script/task", { body: {
-      type: "analyze",
-      params: { topic: script, project_id: state.currentProject ? state.currentProject.project_id : "" }
-    }});
+      // 创建异步任务
+      var styleAnchor = "";
+      if (selectedVisualStyle) {
+        styleAnchor = selectedVisualStyle.video_anchor || "";
+      }
+      const task = await api("/script/task", { body: {
+        type: "analyze",
+        params: { topic: script, style_anchor: styleAnchor, project_id: state.currentProject ? state.currentProject.project_id : "" }
+      }});
     const taskId = task.task_id;
     // 保存 task_id 到 localStorage，刷新后继续轮询
     const taskKey = "zctools_task_analyze_" + (state.currentProject ? state.currentProject.project_id : "_default");
@@ -1885,14 +1889,18 @@ async function generateScript() {
   const tone = document.getElementById("scriptTone").value;
   const wordCountRaw = document.getElementById("scriptWordCount").value.trim();
   const wordCount = wordCountRaw ? parseInt(wordCountRaw) || 0 : 0;
-  const promptId = document.getElementById("promptSelector").value;
+  // 视觉风格锚点
+  var styleAnchor = "";
+  if (selectedVisualStyle) {
+    styleAnchor = selectedVisualStyle.video_anchor || "";
+  }
   btn.disabled = true; btn.textContent = "⏳ 生成中...";
 
   try {
     // 创建异步任务
     const task = await api("/script/task", { body: {
       type: "generate",
-      params: { topic, tone, style: "", duration_seconds: 30, word_count: wordCount, system_prompt_id: promptId }
+      params: { topic, tone, style: styleAnchor, duration_seconds: 30, word_count: wordCount }
     }});
     const taskId = task.task_id;
     const taskKey = "zctools_task_generate_" + (state.currentProject ? state.currentProject.project_id : "_default");
@@ -1957,25 +1965,12 @@ async function modifyScript() {
 async function loadPrompts() {
   try {
     state.prompts = await api("/prompts");
-    const sel = document.getElementById("promptSelector");
-    if (!sel) return;
-    const currentVal = sel.value;
-    sel.innerHTML = state.prompts.map((p) =>
-      `<option value="${p.id}">${p.builtin ? "★ " : "✎ "}${p.name}</option>`
-    ).join("");
-    // 保持当前选中，或默认第一个
-    if (currentVal && state.prompts.some(p => p.id === currentVal)) {
-      sel.value = currentVal;
-    }
-    onPromptChange();
+    // promptSelector 已替换为 visualStyleSelector，不再需要填充下拉
   } catch (e) { console.warn("提示词加载失败:", e.message); }
 }
 
 function onPromptChange() {
-  const id = document.getElementById("promptSelector").value;
-  const prompt = state.prompts.find((p) => p.id === id);
-  const preview = document.getElementById("promptPreview");
-  if (preview) preview.textContent = prompt ? prompt.content.slice(0, 120) + (prompt.content.length > 120 ? "..." : "") : "选择一种风格，AI 将按此风格生成文案";
+  // 已废弃 — 视觉风格预设使用 visualStyleSelector
 }
 
 function showPromptModal() {

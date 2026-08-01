@@ -590,6 +590,7 @@ def _run_llm_task(task_id: str, task_type: str, params: dict):
         if task_type == "analyze":
             topic = params["topic"]
             project_id = params.get("project_id", "")
+            style_anchor = params.get("style_anchor", "")
             char_text = ""
             scene_text = ""
             if project_id:
@@ -615,6 +616,8 @@ def _run_llm_task(task_id: str, task_type: str, params: dict):
             extra_context = ""
             if char_text or scene_text:
                 extra_context = f"\n【项目设定参考】\n{char_text}{scene_text}请根据以上角色和场景设定生成分镜，prompt 中引用角色名称和场景描述。\n\n"
+            if style_anchor:
+                extra_context += f"\n【视觉风格要求】\n{style_anchor}\n请严格按照以上视觉风格描述生成每个镜头的画面。\n\n"
             system_prompt = "你是一个专业的视频分镜师和字幕师。根据文案生成分镜表和SRT字幕。\n首帧提示词和尾帧提示词不能与画面提示词重复，要有起始/结束的区分感。"
             user_prompt = (
                 f"文案内容：\n{topic}\n\n"
