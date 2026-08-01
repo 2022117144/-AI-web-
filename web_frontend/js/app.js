@@ -188,7 +188,46 @@ function _setButtonStatus(key, loading) {
 }
 
 
-  // ========== 健康检查 ==========
+  // ========== 恢复未完成的任务 ==========
+async function _resumePendingTask(pid) {
+  if (!pid) return;
+  const taskKeys = [
+    "zctools_task_analyze_",
+    "zctools_task_generate_",
+    "zctools_task_modify_",
+  ];
+  for (const key of taskKeys) {
+    const taskId = localStorage.getItem(key + pid);
+    if (!taskId) continue;
+    try {
+      const resp = await api("/script/task/" + taskId);
+      if (resp.status === "running") {
+        _setButtonStatus(key, true);
+        _pollTask(taskId, key + pid).then(result => {
+          _setButtonStatus(key, false);
+          if (key === "zctools_task_analyze_") _handleAnalyzeResult(result);
+          else if (key === "zctools_task_generate_") _handleGenerateResult(result);
+          else if (key === "zctools_task_modify_") _handleModifyResult(result);
+        }).catch(e => {
+          _setButtonStatus(key, false);
+          alert("任务恢复失败: " + e.message);
+        });
+      } else if (resp.status === "completed") {
+        localStorage.removeItem(key + pid);
+        if (key === "zctools_task_analyze_") _handleAnalyzeResult(resp.result);
+        else if (key === "zctools_task_generate_") _handleGenerateResult(resp.result);
+        else if (key === "zctools_task_modify_") _handleModifyResult(resp.result);
+      } else {
+        localStorage.removeItem(key + pid);
+      }
+    } catch {
+      localStorage.removeItem(key + pid);
+    }
+    break;
+  }
+}
+
+// ========== 健康检查 ==========
 async function checkStatus() {
   try {
     const h = await api("/health");
@@ -405,11 +444,12 @@ async function switchProject(id) {
         await loadCharacters();
         await loadScenes();
   // 如果该项目有正在执行的流水线，显示其当前状态
-  const runningRun = state.pipelineRuns.find((r) => r.status === "running");
-  if (runningRun) {
-    updatePipelineRunStatus(runningRun);
-    startPipelinePolling(runningRun.run_id);
-  }
+    const runningRun = state.pipelineRuns.find((r) => r.status === "running");
+    if (runningRun) {
+      updatePipelineRunStatus(runningRun);
+    }
+    // 检测是否有未完成的异步任务（切换项目后恢复）
+    _resumePendingTask(id);
 }
 
 function showNewProjectModal() {

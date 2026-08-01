@@ -534,7 +534,7 @@ def generate_script(req: ScriptGenerateRequest):
         messages=[{"role": "user", "content": user_prompt}],
         system_prompt=system_prompt,
         temperature=0.7,
-        max_tokens=4096,
+        max_tokens=8192,
     )
 
     if result:
@@ -565,7 +565,7 @@ def modify_script(req: ScriptGenerateRequest):
         messages=[{"role": "user", "content": user_prompt}],
         system_prompt=system_prompt,
         temperature=0.7,
-        max_tokens=4096,
+        max_tokens=8192,
     )
 
     if result:
@@ -654,7 +654,7 @@ def _run_llm_task(task_id: str, task_type: str, params: dict):
                 messages=[{"role": "user", "content": user_prompt}],
                 system_prompt=system_prompt,
                 temperature=0.3,
-                max_tokens=4096,
+                max_tokens=8192,
             )
             if result:
                 import re
@@ -715,7 +715,7 @@ def _run_llm_task(task_id: str, task_type: str, params: dict):
                 messages=[{"role": "user", "content": user_prompt}],
                 system_prompt=system_prompt,
                 temperature=0.7,
-                max_tokens=4096,
+                max_tokens=8192,
             )
             if result:
                 with _task_lock:
@@ -742,7 +742,7 @@ def _run_llm_task(task_id: str, task_type: str, params: dict):
                 messages=[{"role": "user", "content": user_prompt}],
                 system_prompt=system_prompt,
                 temperature=0.7,
-                max_tokens=4096,
+                max_tokens=8192,
             )
             if result:
                 with _task_lock:
