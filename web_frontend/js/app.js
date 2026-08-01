@@ -103,11 +103,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 恢复上次的 Tab（刷新后保持）— 优先 URL 参数
       const urlParams = new URLSearchParams(window.location.search);
       const urlTab = urlParams.get('tab');
-      if (urlTab && ["script","shots","voiceover","pipeline","settings"].includes(urlTab)) {
-        switchTab(urlTab);
-      } else {
-        const savedTab = localStorage.getItem("zctools_active_tab");
-        if (savedTab && ["script","shots","voiceover","pipeline","settings"].includes(savedTab)) {
+      if (urlTab && ["script","shots","voiceover","pipeline","aitools","settings"].includes(urlTab)) {
+              switchTab(urlTab);
+            } else {
+              const savedTab = localStorage.getItem("zctools_active_tab");
+              if (savedTab && ["script","shots","voiceover","pipeline","aitools","settings"].includes(savedTab)) {
           switchTab(savedTab);
         } else {
           switchTab("script");
@@ -505,7 +505,8 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".tab-content").forEach((c) => c.classList.toggle("active", c.id === "tab-" + name));
   if (name === "pipeline") loadPipelineRuns();
-    if (name === "settings") { loadLLMConfig(); loadCharacters(); loadScenes(); loadProps(); restoreVideoModel(); }
+    if (name === "aitools") { loadCharacters(); loadScenes(); loadProps(); }
+        if (name === "settings") { loadLLMConfig(); restoreVideoModel(); }
         if (name === "script") loadPrompts();
 }
 

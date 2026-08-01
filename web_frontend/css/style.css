@@ -113,7 +113,7 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; outl
 }
 
 /* ====== Tab Content ====== */
-.tab-content { display: none; flex: 1; }
+.tab-content { display: none; flex: 1; overflow-y: auto; }
 .tab-content.active { display: flex; flex-direction: column; }
 
 /* ====== Editor ====== */
