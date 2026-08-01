@@ -19,6 +19,8 @@ let state = {
   // 每个分镜的生成状态 { [idx]: { first: bool, last: bool } }
   // 初始化时先留空，切换项目时从 localStorage 恢复
   shotGenerating: {},
+  // 分镜图片/视频数据缓存（直接从后端加载，不走 localStorage）
+  shotDataCache: {},
 };
 
 // ========== 初始化 ==========
@@ -331,11 +333,11 @@ async function loadProjectContent(projectId, clearIfEmpty = false) {
       renderSRT(content.srt);
       hasData = true;
     }
-    // 恢复分镜图片/视频数据
-        if (content.shot_data && Object.keys(content.shot_data).length > 0) {
-              localStorage.setItem(_shotDataKey(), JSON.stringify(content.shot_data));
-          hasData = true;
-        }
+    // 恢复分镜图片/视频数据（直接缓存到 state，不走 localStorage）
+            if (content.shot_data && Object.keys(content.shot_data).length > 0) {
+                  state.shotDataCache = content.shot_data;
+              hasData = true;
+            }
         // 恢复宫格尺寸
             if (content.grid_size && document.getElementById("gridSizeSelect")) {
               document.getElementById("gridSizeSelect").value = content.grid_size;
@@ -503,7 +505,7 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".tab-content").forEach((c) => c.classList.toggle("active", c.id === "tab-" + name));
   if (name === "pipeline") loadPipelineRuns();
-    if (name === "settings") { loadLLMConfig(); loadCharacters(); loadScenes(); restoreVideoModel(); }
+    if (name === "settings") { loadLLMConfig(); loadCharacters(); loadScenes(); loadProps(); restoreVideoModel(); }
         if (name === "script") loadPrompts();
 }
 
@@ -907,7 +909,10 @@ function _shotDataKey() {
 
 function loadShotData(idx) {
   try {
-    const all = JSON.parse(localStorage.getItem(_shotDataKey()) || "{}");
+    // 优先从 state 缓存读（后端加载的数据），没有才走 localStorage
+    const all = state.shotDataCache && Object.keys(state.shotDataCache).length > 0
+      ? state.shotDataCache
+      : JSON.parse(localStorage.getItem(_shotDataKey()) || "{}");
     const data = all[idx] || {};
     // 本地路径优先，没有才用 CDN URL
     if (data.firstFrameLocal) {
@@ -934,10 +939,18 @@ function _toProjectFileUrl(localPath) {
   // 将本地绝对路径转为 /api/project-files/ 格式
   // 例: D:\万象AI改\zc_backend\data\project_content\proj_xxx\图片\xxx.jpg
   //   → /api/project-files/proj_xxx/图片/xxx.jpg
+  // 也支持正斜杠格式: D:/万象AI改/.../project_content/proj_xxx/...
   const marker = "project_content\\";
   const idx = localPath.indexOf(marker);
   if (idx >= 0) {
     const rel = localPath.substring(idx + marker.length).replace(/\\/g, "/");
+    return "/api/project-files/" + rel;
+  }
+  // 正斜杠版本
+  const marker2 = "project_content/";
+  const idx2 = localPath.indexOf(marker2);
+  if (idx2 >= 0) {
+    const rel = localPath.substring(idx2 + marker2.length);
     return "/api/project-files/" + rel;
   }
   // 如果已经是 /api/ 开头则直接返回
@@ -956,7 +969,9 @@ function saveShotData(idx, data) {
     }
     // 检测是否有 CDN URL 需要下载到本地
     _downloadMediaToLocal(idx, data);
-  } catch {}
+  } catch (e) {
+    console.warn("saveShotData error:", e);
+  }
 }
 
 async function _downloadMediaToLocal(idx, data) {
@@ -970,6 +985,21 @@ async function _downloadMediaToLocal(idx, data) {
   for (const f of fields) {
     const url = data[f.key];
     if (!url || url.startsWith("data:") || url.startsWith("blob:")) continue;
+    // 如果已经是 /api/project-files/ 本地路径，直接存为 xxxLocal 并同步到后端
+    if (url.startsWith("/api/project-files/")) {
+      const all = JSON.parse(localStorage.getItem(_shotDataKey()) || "{}");
+      if (!all[idx]) all[idx] = {};
+      // 从 /api/project-files/proj_xxx/图片/xxx.jpg 还原本地绝对路径
+      const parts = url.replace("/api/project-files/", "").split("/");
+      if (parts.length >= 3) {
+        const localPath = "D:\\万象AI改\\zc_backend\\data\\project_content\\" + parts.join("\\");
+        all[idx][f.key + "Local"] = localPath;
+      }
+      all[idx][f.key + "Url"] = url;
+      localStorage.setItem(_shotDataKey(), JSON.stringify(all));
+      if (state.currentProject) saveProjectContent();
+      continue;
+    }
     // 检查是否已下载过（本地路径以 /api/ 开头或 file: 开头则跳过）
     if (url.startsWith("/api/") || url.startsWith("file:")) continue;
     try {
@@ -1224,58 +1254,61 @@ async function batchGenFrames() {
     if (gen.last) { lastBtn.disabled = true; lastBtn.textContent = "⏳"; }
   }
 
-  // 第二步：同步提交所有请求 — 模拟点击各个按钮
-    // 先收集所有任务（已在上一步完成），然后逐个调用 genFirstFrame/genLastFrame
-    // 但这两个函数返回的是 Promise（.then 链），需要用 Promise.allSettled 等待
-    // 注意：genFirstFrame/genLastFrame 内部会处理 shotGenerating 状态和 DOM 渲染
-    const results = await Promise.allSettled(
-      tasks.map(t =>
-        t.type === "first"
-          ? new Promise(resolve => {
-                        genFirstFrame(t.idx);
-              // 轮询等待该任务完成（shotGenerating[t.idx].first 变回 false）
-              const check = setInterval(() => {
-                if (state.shotGenerating[t.idx] && !state.shotGenerating[t.idx].first) {
-                  clearInterval(check);
-                  resolve({ status: "fulfilled" });
-                }
-              }, 200);
-              setTimeout(() => { clearInterval(check); resolve({ status: "fulfilled" }); }, 60000);
-            })
-          : new Promise(resolve => {
-              genLastFrame(t.idx);
-              const check = setInterval(() => {
-                if (state.shotGenerating[t.idx] && !state.shotGenerating[t.idx].last) {
-                  clearInterval(check);
-                  resolve({ status: "fulfilled" });
-                }
-              }, 200);
-              setTimeout(() => { clearInterval(check); resolve({ status: "fulfilled" }); }, 60000);
-            })
-      )
-    );
+  // 第二步：提交批量生成任务到后端
+      btn.textContent = `⏳ 批量提交 ${tasks.length} 张...`;
 
-    // 第三步：统计结果
-    let success = 0;
-    let fail = 0;
-    for (let i = 0; i < tasks.length; i++) {
-      const r = results[i];
-      if (r.status === "fulfilled") {
-        success++;
-      } else {
-        fail++;
+      try {
+        // 收集参考图
+        const refs = await _getReferenceImages();
+
+        // 提交批量任务
+        const task = await api("/batch-generate-frames", { body: {
+          project_id: state.currentProject ? state.currentProject.project_id : "",
+          aspect_ratio: "16:9",
+          frames: tasks.map(t => ({ prompt: t.prompt, mode: t.type === "first" ? "first_frame" : "last_frame", shot_idx: t.idx })),
+          reference_images: refs,
+        }});
+        const taskId = task.task_id;
+        btn.textContent = `⏳ 生成中 0/${task.total}...`;
+
+        // 轮询任务结果
+        let polled = 0;
+        while (true) {
+          await new Promise(r => setTimeout(r, 3000));
+          const status = await api("/batch-generate-frames/" + taskId);
+          if (status.status === "completed") {
+            // 处理结果
+            let success = 0, fail = 0;
+            for (const r of status.results || []) {
+              if (r.success) {
+                success++;
+                saveShotData(r.shot_idx, { [r.mode === "first_frame" ? "firstFrame" : "lastFrame"]: r.image_url, [r.mode === "first_frame" ? "firstFrameApiUrl" : "lastFrameApiUrl"]: r.image_url });
+              } else {
+                fail++;
+              }
+            }
+            // 刷新显示
+            if (state.selectedShotIdx !== null) selectShot(state.selectedShotIdx);
+            if (state.currentProject) await saveProjectContent();
+            btn.disabled = false;
+            btn.textContent = originalText;
+            window._batchCancelled = false;
+            alert(`批量生成完成！成功 ${success} 张，失败 ${fail} 张`);
+            return;
+          } else if (status.status === "error") {
+            throw new Error(status.error || "批量生成失败");
+          }
+          // 更新进度
+          polled++;
+          btn.textContent = `⏳ 生成中 ${polled * 3}秒...`;
+        }
+      } catch (e) {
+        alert("批量生成失败: " + e.message);
+        btn.disabled = false;
+        btn.textContent = originalText;
+        window._batchCancelled = false;
       }
     }
-
-  // 刷新显示
-      if (state.selectedShotIdx !== null) selectShot(state.selectedShotIdx);
-      if (state.currentProject) await saveProjectContent();
-
-      btn.disabled = false;
-                btn.textContent = originalText;
-                window._batchCancelled = false;
-                    alert(`批量生成完成！成功 ${success} 张，失败 ${fail} 张`);
-          }
 
           /**
            * 一键暂停批量生成 — 释放 shotGenerating 锁，重置所有占位文字
@@ -1328,31 +1361,45 @@ async function batchGenFrames() {
                        * 一键生成所有分镜的视频 — 检查每个分镜是否都有首尾帧，有则生成视频
                        */
                       async function batchGenVideos() {
-                        if (!requireProject()) return;
-                        const shots = state.currentShots;
-                        if (!shots || shots.length === 0) { alert("没有分镜数据"); return; }
+                                              if (!requireProject()) return;
+                                              const shots = state.currentShots;
+                                              if (!shots || shots.length === 0) { alert("没有分镜数据"); return; }
 
-                        // 检查每个分镜是否有首尾帧，并统计需要生成视频的分镜
-                                                const missing = [];
-                                                const tasks = [];
-                                                for (let i = 0; i < shots.length; i++) {
-                                                  const shotData = loadShotData(i);
-                                                  // 跳过已有视频的分镜
-                                                  if (shotData && shotData.video) continue;
-                                                  const prevData = i > 0 ? loadShotData(i - 1) : null;
-                                                  const firstFrame = shotData.firstFrame || shotData.firstFrameUploaded ||
-                                                    (i > 0 ? (prevData.lastFrame || prevData.lastFrameUploaded) : null);
-                                                  const lastFrame = shotData.lastFrame || shotData.lastFrameUploaded;
-                                                  if (!firstFrame) missing.push({ idx: i, type: "首帧" });
-                                                  if (!lastFrame) missing.push({ idx: i, type: "尾帧" });
-                                                  tasks.push({ idx: i });
-                                                }
+                                              // 检查每个分镜是否有首尾帧，并统计需要生成视频的分镜
+                                                                      const missing = [];
+                                                                      const tasks = [];
+                                                                      for (let i = 0; i < shots.length; i++) {
+                                                                        const shotData = loadShotData(i);
+                                                                        // 跳过已有视频的分镜
+                                                                        if (shotData && shotData.video) continue;
+                                                                        const prevData = i > 0 ? loadShotData(i - 1) : null;
+                                                                        const firstFrame = shotData.firstFrame || shotData.firstFrameUploaded ||
+                                                                          (i > 0 ? (prevData.lastFrame || prevData.lastFrameUploaded) : null);
+                                                                        const lastFrame = shotData.lastFrame || shotData.lastFrameUploaded;
+                                                                        if (!firstFrame) missing.push({ idx: i, type: "首帧" });
+                                                                        if (!lastFrame) missing.push({ idx: i, type: "尾帧" });
+                                                                        tasks.push({ idx: i });
+                                                                      }
 
-                                                if (missing.length > 0) {
-                                                  const msg = missing.map(m => `#${m.idx + 1} ${m.type}`).join("、");
-                                                  alert(`缺少首尾帧，无法生成视频：${msg}\n请先生成图片`);
-                                                  return;
-                                                }
+                                                                      if (missing.length > 0) {
+                                                                        const msg = missing.map(m => `#${m.idx + 1} ${m.type}`).join("、");
+                                                                        if (!confirm(`以下分镜缺少首尾帧，将跳过这些分镜不生成视频：\n${msg}\n\n要继续为有首尾帧的分镜生成视频吗？`)) {
+                                                                          return;
+                                                                        }
+                                                                        // 从 tasks 中移除缺帧的分镜（只保留有首帧+尾帧的）
+                                                                        const validTasks = [];
+                                                                        for (const t of tasks) {
+                                                                          const sd = loadShotData(t.idx);
+                                                                          const prevData = t.idx > 0 ? loadShotData(t.idx - 1) : null;
+                                                                          const ff = sd.firstFrame || sd.firstFrameUploaded ||
+                                                                            (t.idx > 0 ? (prevData.lastFrame || prevData.lastFrameUploaded) : null);
+                                                                          const lf = sd.lastFrame || sd.lastFrameUploaded;
+                                                                          if (ff && lf) validTasks.push(t);
+                                                                        }
+                                                                        tasks.length = 0;
+                                                                        tasks.push(...validTasks);
+                                                                        if (tasks.length === 0) { alert("所有分镜都缺少首尾帧，无法生成视频"); return; }
+                                                                      }
 
                                                 // 检查 insMind 可用账号数是否足够
                                                                         let availableAccounts = 0;
@@ -2313,6 +2360,13 @@ async function testLLMConfig() {
   - 右上角：原图（正面细节图，展示角色面部和服装细节）
   要求：全身图，四张图角色形象完全一致，服装、发色、体型统一。`;
 
+const PROP_THREE_VIEW_PROMPT = `生成该道具的三视图拼图，布局要求：
+  - 左下角：正面主视图（道具的正面展示）
+  - 左上角：背面视图（道具的背面展示）
+  - 右下角：侧面视图（道具的侧面展示）
+  - 右上角：原图（道具的细节特写）
+  要求：四张图道具外观完全一致，材质、颜色、结构统一，纯色背景。`;
+
   async function genThreeView(charId) {
     if (!state.currentProject) { alert("请先选择项目"); return; }
     const chars = await api("/characters?project_id=" + state.currentProject.project_id);
@@ -2371,7 +2425,7 @@ async function testLLMConfig() {
         }
 
         // ========== 场景管理 ==========
-    async function loadScenes() {
+async function loadScenes() {
           const list = document.getElementById("sceneList");
           if (!list) return;
           _syncSettingsSelector();
@@ -2388,38 +2442,30 @@ async function testLLMConfig() {
         list.innerHTML = scenes.map((s, si) => `
           <div class="char-item" data-scene-idx="${si}">
             <div class="char-cols">
-              <!-- 列一：填写信息生成场景图 -->
+              <!-- 列一：上传图片 + 修改原图 -->
               <div class="char-col">
-                <div class="char-col-title">✏️ 填写信息生成场景图 <button class="char-del-btn" onclick="deleteScene('${s.id}')" title="删除场景">弃</button></div>
-                <div class="char-gen-layout">
-                  <div class="char-gen-fields">
-                    <input class="char-field char-name-field" value="${escHtml(s.name === "新场景" ? "未命名" : s.name)}" placeholder="未命名" onchange="updateSceneField('${s.id}','name',this.value)" onclick="this.select()" title="点击重命名">
-                    <input class="char-field" value="${escHtml(s.style || "")}" placeholder="场景风格（如：古风庭院）" onchange="updateSceneField('${s.id}','style',this.value)">
-                    <button class="char-gen-btn" onclick="genSceneImage('${s.id}')" id="genSceneBtn_${s.id}">🖼 生成场景图</button>
+                <div class="char-upload-gen-layout">
+                  <div class="char-upload-area" onclick="uploadSceneImage('${s.id}')">
+                    ${s.uploaded_image
+                      ? `<img src="${s.uploaded_image}" class="char-upload-img">`
+                      : '<div class="char-upload-placeholder">+<br>点击上传图片</div>'}
+                    ${s.uploaded_image ? `<span class="char-clear-btn" onclick="event.stopPropagation();clearSceneImage('${s.id}')">清空</span>` : ""}
                   </div>
-                  <div class="char-gen-preview" id="scenePreview_${s.id}">
+                  <input type="file" id="sceneUpload_${s.id}" accept="image/*" style="display:none" onchange="handleSceneUpload(event,'${s.id}')">
+                  <div class="char-gen-btn-area">
+                    <button class="char-gen-btn" onclick="genSceneImage('${s.id}')" id="genSceneBtn_${s.id}">🖼 修改原图</button>
+                  </div>
+                  <div class="char-preview-area" id="scenePreview_${s.id}">
                     ${s.generated_image
                       ? `<img src="${s.generated_image}" class="char-preview-img">`
-                      : '<div class="char-preview-placeholder">生成后预览</div>'}
+                      : '<div class="char-preview-placeholder">修改后预览</div>'}
                   </div>
                 </div>
               </div>
-              <!-- 列二：上传场景图片 -->
-              <div class="char-col">
-                <div class="char-col-title">
-                  📷 上传场景图片
-                  ${s.uploaded_image ? `<span class="char-clear-btn" onclick="event.stopPropagation();clearSceneImage('${s.id}')">清空</span>` : ""}
-                </div>
-                <div class="char-upload-box" onclick="uploadSceneImage('${s.id}')">
-                  ${s.uploaded_image
-                    ? `<img src="${s.uploaded_image}" class="char-upload-img">`
-                    : '<div class="char-upload-placeholder">+<br>点击上传</div>'}
-                </div>
-                <input type="file" id="sceneUpload_${s.id}" accept="image/*" style="display:none" onchange="handleSceneUpload(event,'${s.id}')">
-              </div>
-              <!-- 列三：场景提示词 -->
+              <!-- 列二：场景提示词 -->
               <div class="char-col char-col-prompt">
-                <div class="char-col-title">📝 场景提示词</div>
+                <div class="char-col-title"><span class="char-name-display" id="sceneNameDisplay_${s.id}" onclick="renameScene('${s.id}')">${escHtml(s.name === "新场景" ? "未命名" : s.name)}</span> <button class="char-del-btn" onclick="deleteScene('${s.id}')" title="删除场景">弃</button></div>
+                <input class="char-field" value="${escHtml(s.style || "")}" placeholder="场景风格（如：古风庭院）" onchange="updateSceneField('${s.id}','style',this.value)" style="margin-bottom:4px;width:100%;box-sizing:border-box">
                 <textarea class="char-prompt-textarea" placeholder="该场景的详细描述，用于生成时保持场景一致性..." onchange="updateSceneField('${s.id}','description',this.value)">${escHtml(s.description || "")}</textarea>
               </div>
             </div>
@@ -2457,6 +2503,14 @@ async function testLLMConfig() {
       else if (field === "style") updates.style = value;
       else if (field === "description") updates.description = value;
       await api("/scenes/" + sceneId, { method: "PUT", body: updates });
+    }
+
+    async function renameScene(sceneId) {
+      const name = prompt("输入新名称：");
+      if (!name) return;
+      await updateSceneField(sceneId, "name", name);
+      const el = document.getElementById("sceneNameDisplay_" + sceneId);
+      if (el) el.textContent = name;
     }
 
     function uploadSceneImage(sceneId) {
@@ -2497,13 +2551,14 @@ async function testLLMConfig() {
       const scenes = await api("/scenes?project_id=" + state.currentProject.project_id);
       const s = scenes.find(x => x.id === sceneId);
       if (!s) { alert("场景不存在"); return; }
-      const prompt = "生成一张场景图：" + (s.style || s.name) + "，" + (s.description || "");
+      const prompt = "修改场景图，保持原图构图和主体不变，仅根据描述调整细节。" + (s.style || s.name) + "，" + (s.description || "");
       const btn = document.getElementById("genSceneBtn_" + sceneId);
       if (!btn) return;
       btn.disabled = true; btn.textContent = "⏳";
       try {
+        const refs = s.uploaded_image ? [s.uploaded_image] : [];
         const res = await api("/generate-frame", {
-          body: { prompt: prompt, aspect_ratio: "16:9", mode: "scene", project_id: state.currentProject.project_id, shot_idx: 0 }
+          body: { prompt: prompt, aspect_ratio: "16:9", mode: "scene", project_id: state.currentProject.project_id, shot_idx: 0, reference_images: refs }
         });
         if (res.success && res.image_url) {
           await api("/scenes/" + sceneId, {
@@ -2511,14 +2566,154 @@ async function testLLMConfig() {
             body: { project_id: state.currentProject.project_id, name: s.name, style: s.style || "", description: s.description || "", generated_image: res.image_url }
           });
           await loadScenes();
-          alert("场景图生成成功！");
+          alert("场景图修改成功！");
         } else {
-          alert("生成失败: " + (res.error || "未知错误"));
+          alert("修改失败: " + (res.error || "未知错误"));
         }
-      } catch (e) { alert("生成失败: " + e.message); }
-      finally { btn.disabled = false; btn.textContent = "🖼 生成场景图"; }
-    }
-
+      } catch (e) { alert("修改失败: " + e.message); }
+      finally { btn.disabled = false; btn.textContent = "🖼 修改原图"; }
+    }          // ========== 道具管理 ==========
+async function loadProps() {
+            const list = document.getElementById("propList");
+            if (!list) return;
+            _syncSettingsSelector();
+            if (!state.currentProject) {
+              list.innerHTML = '<div class="settings-hint" style="padding:8px 0">请先选择项目</div>';
+              return;
+            }
+            try {
+              const props = await api("/props?project_id=" + state.currentProject.project_id);
+              if (!props || props.length === 0) {
+                list.innerHTML = '<div class="settings-hint" style="padding:8px 0">暂无道具，点击添加</div>';
+                return;
+              }
+              list.innerHTML = props.map((p, pi) => `
+                <div class="char-item" data-prop-idx="${pi}">
+                  <div class="char-cols">
+                    <!-- 列一：上传图片 + 生成三视图 -->
+                    <div class="char-col">
+                      <div class="char-upload-gen-layout">
+                        <div class="char-upload-area" onclick="uploadPropImage('${p.id}')">
+                          ${p.uploaded_image
+                            ? `<img src="${p.uploaded_image}" class="char-upload-img">`
+                            : '<div class="char-upload-placeholder">+<br>点击上传图片</div>'}
+                          ${p.uploaded_image ? `<span class="char-clear-btn" onclick="event.stopPropagation();clearPropImage('${p.id}')">清空</span>` : ""}
+                        </div>
+                        <input type="file" id="propUpload_${p.id}" accept="image/*" style="display:none" onchange="handlePropUpload(event,'${p.id}')">
+                        <div class="char-gen-btn-area">
+                          <button class="char-gen-btn" onclick="genPropThreeView('${p.id}')" id="genProp3Btn_${p.id}">🖼 生成三视图</button>
+                        </div>
+                        <div class="char-preview-area" id="propPreview_${p.id}">
+                          ${p.three_view && p.three_view.images && p.three_view.images.length > 0
+                            ? `<img src="${p.three_view.images[0]}" class="char-preview-img">`
+                            : '<div class="char-preview-placeholder">生成后预览</div>'}
+                        </div>
+                      </div>
+                    </div>
+                    <!-- 列二：道具提示词 -->
+                    <div class="char-col char-col-prompt">
+                      <div class="char-col-title"><span class="char-name-display" id="propNameDisplay_${p.id}" onclick="renameProp('${p.id}')">${escHtml(p.name)}</span> <button class="char-del-btn" onclick="deleteProp('${p.id}')" title="删除道具">弃</button></div>
+                      <textarea class="char-prompt-textarea" placeholder="道具名称、风格、外观、材质等详细描述，用于生成时保持道具一致性..." onchange="updatePropField('${p.id}','description',this.value)">${escHtml(p.description || "")}</textarea>
+                    </div>
+                  </div>
+                </div>
+              `).join("");
+            } catch {}
+          }
+          async function addProp() {
+            if (!state.currentProject) { alert("请先选择项目"); return; }
+            try {
+              await api("/props", {
+                method: "POST",
+                body: { project_id: state.currentProject.project_id, name: "新道具", style: "", voice: { gender: "", tone: "", speed: "中" }, description: "" }
+              });
+              await loadProps();
+            } catch (e) { alert("添加失败: " + e.message); }
+          }
+          async function deleteProp(propId) {
+            if (!state.currentProject || !confirm("删除该道具？")) return;
+            try {
+              await api("/props/" + propId + "?project_id=" + state.currentProject.project_id, { method: "DELETE" });
+              await loadProps();
+            } catch (e) { alert("删除失败: " + e.message); }
+          }
+          async function updatePropField(propId, field, value) {
+            if (!state.currentProject) return;
+            const props = await api("/props?project_id=" + state.currentProject.project_id);
+            const p = props.find(x => x.id === propId);
+            if (!p) return;
+            const updates = { project_id: state.currentProject.project_id, name: p.name, style: p.style || "", voice: p.voice || { gender: "", tone: "", speed: "中" }, description: "" };
+            if (field === "name") updates.name = value;
+            else if (field === "style") updates.style = value;
+            else if (field === "personality") { if (!updates.voice) updates.voice = { gender: "", tone: "", speed: "中" }; updates.voice.tone = value; }
+            await api("/props/" + propId, { method: "PUT", body: updates });
+          }
+          async function renameProp(propId) {
+            const name = prompt("输入新名称：");
+            if (!name) return;
+            await updatePropField(propId, "name", name);
+            const el = document.getElementById("propNameDisplay_" + propId);
+            if (el) el.textContent = name;
+          }
+          function uploadPropImage(propId) {
+            document.getElementById("propUpload_" + propId).click();
+          }
+          async function handlePropUpload(event, propId) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+              const dataUrl = e.target.result;
+              const props = await api("/props?project_id=" + state.currentProject.project_id);
+              const p = props.find(x => x.id === propId);
+              if (!p) return;
+              await api("/props/" + propId, {
+                method: "PUT",
+                body: { project_id: state.currentProject.project_id, name: p.name, style: p.style || "", voice: p.voice || { gender: "", tone: "", speed: "中" }, description: "", uploaded_image: dataUrl }
+              });
+              await loadProps();
+            };
+            reader.readAsDataURL(file);
+          }
+          async function clearPropImage(propId) {
+            if (!state.currentProject) return;
+            const props = await api("/props?project_id=" + state.currentProject.project_id);
+            const p = props.find(x => x.id === propId);
+            if (!p) return;
+            await api("/props/" + propId, {
+              method: "PUT",
+              body: { project_id: state.currentProject.project_id, name: p.name, style: p.style || "", voice: p.voice || { gender: "", tone: "", speed: "中" }, description: "", uploaded_image: "" }
+            });
+            await loadProps();
+          }
+          async function genPropThreeView(propId) {
+            if (!state.currentProject) { alert("请先选择项目"); return; }
+            const props = await api("/props?project_id=" + state.currentProject.project_id);
+            const p = props.find(x => x.id === propId);
+            if (!p) { alert("道具不存在"); return; }
+            const desc = [p.style, p.voice && p.voice.tone].filter(Boolean).join("，");
+            const prompt = PROP_THREE_VIEW_PROMPT + "\n道具描述：" + (desc || p.name);
+            const refs = p.uploaded_image ? [p.uploaded_image] : [];
+            const btn = document.getElementById("genProp3Btn_" + propId);
+            if (!btn) return;
+            btn.disabled = true; btn.textContent = "⏳";
+            try {
+              const res = await api("/generate-frame", {
+                body: { prompt: prompt, aspect_ratio: "16:9", mode: "character", project_id: state.currentProject.project_id, shot_idx: 0, reference_images: refs }
+              });
+              if (res.success && res.image_url) {
+                await api("/props/" + propId, {
+                  method: "PUT",
+                  body: { project_id: state.currentProject.project_id, name: p.name, style: p.style || "", voice: p.voice || { gender: "", tone: "", speed: "中" }, description: "", three_view: { images: [res.image_url] } }
+                });
+                await loadProps();
+                alert("三视图生成成功！");
+              } else {
+                alert("生成失败: " + (res.error || "未知错误"));
+              }
+            } catch (e) { alert("生成失败: " + e.message); }
+            finally { btn.disabled = false; btn.textContent = "🖼 生成三视图"; }
+          }
 // ========== 弹窗关闭 ==========
 document.addEventListener("click", (e) => {
   if (e.target.classList.contains("modal-overlay")) e.target.classList.remove("show");

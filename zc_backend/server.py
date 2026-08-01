@@ -30,12 +30,13 @@ import prompts as prompts_mod
 # 角色管理
 import characters as chars_mod
 import scenes as scenes_mod
+import props as props_mod
 
 from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 
 # 反缓存头
@@ -838,6 +839,17 @@ class CharacterRequest(BaseModel):
     three_view: dict = {}
     uploaded_image: str = ""
 
+class PropRequest(BaseModel):
+    project_id: str = ""
+    prop_id: str = ""
+    name: str = ""
+    style: str = ""
+    voice: dict = {}
+    reference_image: str = ""
+    description: str = ""
+    three_view: dict = {}
+    uploaded_image: str = ""
+
 @app.get("/api/characters")
 def list_characters(project_id: str = ""):
     """列出项目角色"""
@@ -906,6 +918,7 @@ class SceneRequest(BaseModel):
     style: str = ""
     description: str = ""
     uploaded_image: str = ""
+    generated_image: str = ""
 
 
 @app.get("/api/scenes")
@@ -926,6 +939,7 @@ def create_scene(req: SceneRequest):
         "style": req.style,
         "description": req.description,
         "uploaded_image": req.uploaded_image,
+        "generated_image": req.generated_image,
     })
 
 
@@ -939,6 +953,7 @@ def update_scene(scene_id: str, req: SceneRequest):
         "style": req.style,
         "description": req.description,
         "uploaded_image": req.uploaded_image,
+        "generated_image": req.generated_image,
     }
     # 如果上传了 data URL 图片，保存到项目文件夹
     if req.uploaded_image and req.uploaded_image.startswith("data:"):
@@ -964,8 +979,59 @@ def delete_scene(scene_id: str, project_id: str = ""):
     return {"status": "deleted"}
 
 
-    # ============================================================
-    # API: 生成任务（框架，接入你自己的工具）
+# API: 道具管理
+@app.get("/api/props")
+def list_props(project_id: str = ""):
+    """列出项目道具"""
+    if not project_id:
+        return []
+    return props_mod.list_props(project_id)
+
+@app.post("/api/props")
+def create_prop(req: PropRequest):
+    """添加道具"""
+    if not req.project_id:
+        raise HTTPException(400, "请指定项目")
+    return props_mod.create_prop(req.project_id, {
+        "name": req.name,
+        "style": req.style,
+        "voice": req.voice,
+        "reference_image": req.reference_image,
+        "description": req.description,
+    })
+
+@app.put("/api/props/{prop_id}")
+def update_prop(prop_id: str, req: PropRequest):
+    """修改道具"""
+    if not req.project_id:
+        raise HTTPException(400, "请指定项目")
+    updates = {
+        "name": req.name,
+        "style": req.style,
+        "voice": req.voice,
+        "reference_image": req.reference_image,
+        "description": req.description,
+        "three_view": req.three_view,
+        "uploaded_image": req.uploaded_image,
+    }
+    result = props_mod.update_prop(req.project_id, prop_id, updates)
+    if not result:
+        raise HTTPException(404, "道具不存在")
+    return result
+
+@app.delete("/api/props/{prop_id}")
+def delete_prop(prop_id: str, project_id: str = ""):
+    """删除道具"""
+    if not project_id:
+        raise HTTPException(400, "请指定项目")
+    ok = props_mod.delete_prop(project_id, prop_id)
+    if not ok:
+        raise HTTPException(404, "道具不存在")
+    return {"status": "deleted"}
+
+
+        # ============================================================
+        # API: 生成任务（框架，接入你自己的工具）
         # ============================================================
 GENERATION_HANDLER = None
 
@@ -1603,10 +1669,11 @@ async def generate_video(req: VideoGenRequest):
             payload["input_images"] = input_images
 
         # 调 8005 不走代理（trust_env=False 跳过环境变量代理）
-        resp = _httpx.post(
-            f"http://localhost:8005/api/content/generate",
-            json=payload, timeout=30, trust_env=False,
-        )
+        async with _httpx.AsyncClient(timeout=30, trust_env=False) as _client:
+            resp = await _client.post(
+                f"http://localhost:8005/api/content/generate",
+                json=payload,
+            )
         if resp.status_code != 200:
             return {"success": False, "error": f"提交失败 (HTTP {resp.status_code})"}
 
@@ -1736,7 +1803,8 @@ async def _poll_video_result_async(job_id: int, max_poll: int = 10) -> tuple:
         if i > 0:
             await asyncio.sleep(60)
         try:
-            resp = _httpx.get(f"http://localhost:8005/api/content/jobs/{job_id}", timeout=10, trust_env=False)
+            async with _httpx.AsyncClient(timeout=10, trust_env=False) as _client:
+                resp = await _client.get("http://localhost:8005/api/content/jobs/" + str(job_id))
             if resp.status_code == 404:
                 return ("", "任务不存在")
             job_data = resp.json()

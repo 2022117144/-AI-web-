@@ -555,15 +555,19 @@ function sbLoadFromProject(projectId) {
       if (data && data.shots && data.shots.length > 0) {
         sbShots = data.shots.map(function(s, i){
           var sd = (data.shot_data || {})[String(i)] || {};
+          // 优先用本地路径（xxxLocal），没有才用 CDN URL
+          var firstFrame = sd.firstFrameLocal ? '/api/project-files/' + sd.firstFrameLocal.replace(/\\/g, '/') : (sd.firstFrame || '');
+          var lastFrame = sd.lastFrameLocal ? '/api/project-files/' + sd.lastFrameLocal.replace(/\\/g, '/') : (sd.lastFrame || '');
+          var video = sd.videoLocal ? '/api/project-files/' + sd.videoLocal.replace(/\\/g, '/') : (sd.video || '');
           return {
             script: s.voiceover || '',
             prompt: s.prompt || '',
             character: sd.character || '',
             scene: sd.scene || '',
             prop: sd.prop || '',
-            firstFrame: sd.firstFrame || '',
-            lastFrame: sd.lastFrame || '',
-            video: sd.video || '',
+            firstFrame: firstFrame,
+            lastFrame: lastFrame,
+            video: video,
           };
         });
         sbGenStatus = {};
@@ -632,7 +636,7 @@ function sbRender() {
 '</div>' +
 '</div>' +
 '</td>' +
-            '<td class="sb-col-action"><button class="sb-btn" onclick="sbGenVideo(' + i + ')">▶ 生成</button></td>' +
+            '<td class="sb-col-action">' + (s.video ? '<button class="sb-btn sb-btn-video" onclick="sbPlayVideo(\'' + s.video + '\')" title="播放视频"><span class="sb-video-icon">🎬</span><span>▶打开</span></button>' : '<button class="sb-btn sb-btn-gen" onclick="sbGenVideo(' + i + ')">▶ 生成</button>') + '</td>' +
     '</tr>';
       }).join('');
 }
@@ -656,10 +660,46 @@ function saveSbData() {
   });
   // 每行给一个 index
   shots.forEach(function(s, i){ s.index = i + 1; });
+  // 保存 shot_data（图片、视频等非文本字段）
+    var shotData = {};
+    sbShots.forEach(function(s, i){
+      var key = String(i);
+      var entry = {};
+      if (s.character) entry.character = s.character;
+      if (s.scene) entry.scene = s.scene;
+      if (s.prop) entry.prop = s.prop;
+      // 如果是 /api/project-files/ 开头的本地路径，存 xxxLocal（绝对路径）
+      // 否则存原始 URL
+      if (s.firstFrame) {
+        if (s.firstFrame.startsWith('/api/project-files/')) {
+          entry.firstFrameLocal = s.firstFrame.replace('/api/project-files/', '');
+          entry.firstFrame = s.firstFrame;
+        } else {
+          entry.firstFrame = s.firstFrame;
+        }
+      }
+      if (s.lastFrame) {
+        if (s.lastFrame.startsWith('/api/project-files/')) {
+          entry.lastFrameLocal = s.lastFrame.replace('/api/project-files/', '');
+          entry.lastFrame = s.lastFrame;
+        } else {
+          entry.lastFrame = s.lastFrame;
+        }
+      }
+      if (s.video) {
+        if (s.video.startsWith('/api/project-files/')) {
+          entry.videoLocal = s.video.replace('/api/project-files/', '');
+          entry.video = s.video;
+        } else {
+          entry.video = s.video;
+        }
+      }
+      if (Object.keys(entry).length > 0) shotData[key] = entry;
+    });
   fetch(API_BASE + '/api/projects/' + encodeURIComponent(sbCurrentProject) + '/content', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({shots: shots})
+    body: JSON.stringify({shots: shots, shot_data: shotData})
   }).catch(function(){});
 }
 
@@ -722,7 +762,65 @@ function sbPickAsset(i, type) {
 function sbGenVoice(i) { alert('配音生成功能待接入'); }
 function sbGenFirstFrame(i) { alert('首帧生成功能待接入'); }
 function sbGenLastFrame(i) { alert('尾帧生成功能待接入'); }
-function sbGenVideo(i) { alert('视频生成功能待接入'); }
+function sbGenVideo(i) {
+  var shot = sbShots[i];
+  if (!shot || !shot.prompt) { alert('请先填写分镜的 PROMPT'); return; }
+  sbGenStatus[i] = sbGenStatus[i] || {};
+  sbGenStatus[i].video = 'loading';
+  sbRender();
+  var shots = [{
+    index: i + 1,
+    prompt: shot.prompt,
+    voiceover: shot.script || '',
+    first_frame: shot.firstFrame || '',
+    last_frame: shot.lastFrame || '',
+    duration: 10,
+  }];
+  fetch(API_BASE + '/api/storyboard/generate-video', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({shots: shots, shot_frames: {}, model: 'Pixverse-V6.0', ratio: '16:9', resolution: '360p', duration: 10})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data){
+    if (data.code === 200 && data.data && data.data.output && data.data.output.videos) {
+      var v = data.data.output.videos[0];
+      if (v && v.video_url) {
+        sbShots[i].video = v.video_url;
+        sbGenStatus[i].video = 'done';
+        saveSbData();
+      } else {
+        sbGenStatus[i].video = 'error';
+        alert('视频生成失败: ' + (v.error || '无返回 URL'));
+      }
+    } else {
+      sbGenStatus[i].video = 'error';
+      alert('视频生成失败: ' + (data.data ? data.data.error : '请求失败'));
+    }
+    sbRender();
+  })
+  .catch(function(err){
+    sbGenStatus[i].video = 'error';
+    sbRender();
+    alert('视频生成请求失败: ' + err.message);
+  });
+}
+function sbPlayVideo(url) {
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:9999;display:flex;align-items:center;justify-content:center';
+  overlay.onclick = function(){ document.body.removeChild(overlay); };
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'max-width:90vw;max-height:90vh;background:#000;border-radius:8px;overflow:hidden;box-shadow:0 4px 40px rgba(0,0,0,0.5)';
+  wrap.onclick = function(e){ e.stopPropagation(); };
+  var video = document.createElement('video');
+  video.src = url;
+  video.controls = true;
+  video.autoplay = true;
+  video.style.cssText = 'display:block;max-width:90vw;max-height:90vh';
+  wrap.appendChild(video);
+  overlay.appendChild(wrap);
+  document.body.appendChild(overlay);
+}
 function sbBatchGen() { alert('批量生成功能待接入'); }
 function sbImportScript() { alert('导入文案功能待接入'); }
 
@@ -815,9 +913,10 @@ function sbAddScene() {
 .sb-col-idx{width:40px;text-align:center}
 .sb-col-script{width:auto;min-width:180px;max-width:320px}
 .sb-col-asset{width:85px;text-align:center}
-.sb-col-action{width:80px;text-align:center}
+.sb-col-action{width:80px;text-align:center;vertical-align:middle}
 .sb-col-frame{width:130px;text-align:center;height:1px}
 .sb-table td{padding:3px 4px;vertical-align:top;border-bottom:1px solid var(--border);background:var(--bg)}
+.sb-table td.sb-col-action{vertical-align:middle}
 .sb-table th:not(:first-child), .sb-table td:not(:first-child){border-left:1px solid #555}
 .sb-empty{padding:40px;text-align:center;color:var(--text2);font-size:13px}
 .sb-idx{width:24px;height:24px;border-radius:50%;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text);margin:0 auto;flex-shrink:0}
@@ -846,6 +945,10 @@ function sbAddScene() {
 .sb-asset-img{width:100%;height:100%;object-fit:cover}
 .sb-btn{width:100%;padding:3px 0;border:1px solid var(--border);border-radius:3px;background:var(--bg2);color:var(--text);font-size:10px;cursor:pointer;white-space:nowrap}
 .sb-btn:hover{border-color:#007acc;color:#007acc}
+.sb-btn-video,.sb-btn-gen{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px 0 4px!important;gap:3px;line-height:1.1;height:100%;min-height:60px}
+.sb-btn-video .sb-video-icon{font-size:22px;display:block;margin-bottom:1px}
+.sb-btn-video span:last-child{font-size:10px;color:var(--text2);white-space:nowrap}
+.sb-btn-video:hover span:last-child{color:#007acc}
 
 .sb-icon-btn{width:24px;height:24px;border:1px solid var(--border);border-radius:3px;background:var(--bg2);color:var(--text2);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .sb-icon-btn:hover{border-color:#007acc;color:var(--text)}
