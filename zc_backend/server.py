@@ -8,6 +8,9 @@
 端口: 8765 (可通过 ZCTOOLS_PORT 环境变量设置)
 """
 import json, os, uuid, sys, requests, threading
+import json, os, uuid, sys, requests, threading, logging
+logger = logging.getLogger("zc_server")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
@@ -673,14 +676,17 @@ def _run_llm_task(task_id: str, task_type: str, params: dict):
                             shot.setdefault("last_frame_prompt", shot.get("prompt", ""))
                         with _task_lock:
                             _task_store[task_id] = {"status": "completed", "result": {"shots": shots, "srt": srt, "generated": True}}
+                        logger.info(f"[LLM任务] analyze 完成: {task_id}, shots={len(shots)}")
                         return
                     except:
                         pass
                 with _task_lock:
                     _task_store[task_id] = {"status": "completed", "result": {"shots": [], "srt": [], "generated": True, "raw": result}}
+                logger.info(f"[LLM任务] analyze 完成(原始): {task_id}, raw_len={len(result) if result else 0}")
                 return
             with _task_lock:
                 _task_store[task_id] = {"status": "error", "error": "LLM 分析失败"}
+            logger.info(f"[LLM任务] analyze 失败: {task_id}")
 
         elif task_type == "generate":
             topic = params["topic"]
@@ -714,9 +720,11 @@ def _run_llm_task(task_id: str, task_type: str, params: dict):
             if result:
                 with _task_lock:
                     _task_store[task_id] = {"status": "completed", "result": {"script": result.strip(), "generated": True}}
+                logger.info(f"[LLM任务] generate 完成: {task_id}, len={len(result.strip())}")
             else:
                 with _task_lock:
                     _task_store[task_id] = {"status": "error", "error": "LLM 生成失败，请检查配置"}
+                logger.info(f"[LLM任务] generate 失败: {task_id}")
 
         elif task_type == "modify":
             current_script = params["topic"]
@@ -739,13 +747,16 @@ def _run_llm_task(task_id: str, task_type: str, params: dict):
             if result:
                 with _task_lock:
                     _task_store[task_id] = {"status": "completed", "result": {"script": result.strip(), "modified": True}}
+                logger.info(f"[LLM任务] modify 完成: {task_id}, len={len(result.strip())}")
             else:
                 with _task_lock:
                     _task_store[task_id] = {"status": "error", "error": "LLM 修改失败，请检查配置"}
+                logger.info(f"[LLM任务] modify 失败: {task_id}")
 
     except Exception as e:
         with _task_lock:
             _task_store[task_id] = {"status": "error", "error": str(e)}
+        logger.info(f"[LLM任务] 异常: {task_id}, {e}")
 
 
 @app.post("/api/script/task")
