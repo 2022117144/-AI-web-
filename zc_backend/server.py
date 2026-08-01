@@ -332,23 +332,35 @@ def serve_project_file(project_id: str, subdir: str, filename: str):
 
 @app.put("/api/projects/{project_id}/content")
 async def save_project_content(project_id: str, request: Request):
-    """保存项目内容到文件夹结构"""
+    """保存项目内容到文件夹结构，覆盖前自动备份旧版本为 _prev"""
     body = await request.json()
     proj_dir = PROJECT_CONTENT_DIR / project_id
     proj_dir.mkdir(parents=True, exist_ok=True)
     for sub in ["文案", "视频提示词", "图片", "视频"]:
         (proj_dir / sub).mkdir(parents=True, exist_ok=True)
+    # 备份旧文件：覆盖前把当前文件重命名为 _prev
+    def _backup_if_exists(path):
+        if path.exists():
+            prev = path.with_name(path.stem + "_prev" + path.suffix)
+            if prev.exists():
+                prev.unlink()
+            path.rename(prev)
     # 保存文案
     if "script_text" in body:
+        _backup_if_exists(proj_dir / "文案" / "script.txt")
         (proj_dir / "文案" / "script.txt").write_text(body.get("script_text", ""), encoding="utf-8")
     # 保存分镜/提示词
     if "shots" in body:
+        _backup_if_exists(proj_dir / "视频提示词" / "shots.json")
         save_json(proj_dir / "视频提示词" / "shots.json", body["shots"])
     if "srt" in body:
+        _backup_if_exists(proj_dir / "视频提示词" / "srt.json")
         save_json(proj_dir / "视频提示词" / "srt.json", body["srt"])
     if "shot_data" in body:
+        _backup_if_exists(proj_dir / "视频提示词" / "shot_data.json")
         save_json(proj_dir / "视频提示词" / "shot_data.json", body["shot_data"])
     # 保存完整 content.json 作为备份
+    _backup_if_exists(proj_dir / "content.json")
     save_json(proj_dir / "content.json", body)
     return {"status": "saved", "project_dir": str(proj_dir)}
 
@@ -372,6 +384,41 @@ def get_project_content(project_id: str):
     if shot_data_file.exists():
         data["shot_data"] = load_json(shot_data_file, {})
     return data
+
+
+# ============================================================
+# API: 下载媒体文件到本地项目文件夹
+# ============================================================
+
+@app.post("/api/projects/{project_id}/download-media")
+def download_project_media(project_id: str, req: dict = Body(...)):
+    """下载 URL 到项目本地文件夹，返回本地路径"""
+    url = req.get("url", "")
+    media_type = req.get("type", "image")
+    if not url:
+        raise HTTPException(400, "请提供 URL")
+    proj_dir = PROJECT_CONTENT_DIR / project_id
+    sub_dir = proj_dir / ("图片" if media_type == "image" else "视频")
+    sub_dir.mkdir(parents=True, exist_ok=True)
+    import hashlib
+    ext = os.path.splitext(url.split("?")[0])[1] or ".jpg"
+    if ext.lower() not in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm", ".mov"):
+        ext = ".jpg" if media_type == "image" else ".mp4"
+    filename = hashlib.md5(url.encode()).hexdigest()[:16] + ext
+    local_path = sub_dir / filename
+    if local_path.exists():
+        return {"local_path": str(local_path), "url": url, "cached": True}
+    try:
+        import requests
+        resp = requests.get(url, timeout=60, stream=True)
+        resp.raise_for_status()
+        with open(local_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+        return {"local_path": str(local_path), "url": url, "cached": False}
+    except Exception as e:
+        raise HTTPException(500, f"下载失败: {e}")
+
 
 # ============================================================
 # API: 风格预设
@@ -524,112 +571,206 @@ def modify_script(req: ScriptGenerateRequest):
 
 
 # ============================================================
-# API: 文案分析 → 分镜 + SRT
+# API: 异步 LLM 任务队列
 # ============================================================
 
-@app.post("/api/script/analyze")
-def analyze_script(req: ScriptGenerateRequest):
-    """用 LLM 分析文案，生成分镜列表 + SRT 字幕"""
-    topic = req.topic or ""
-    if not topic:
-        raise HTTPException(400, "请提供文案内容")
+import uuid
+import threading
 
-    # 查询当前项目的角色和场景信息
-    char_text = ""
-    scene_text = ""
-    if req.project_id:
-        try:
-            import characters as char_mod
-            import scenes as scene_mod
-            chars = char_mod.list_characters(req.project_id)
-            scenes = scene_mod.list_scenes(req.project_id)
-            if chars:
-                lines = []
-                for c in chars:
-                    desc = c.get("description", "") or c.get("style", "") or ""
-                    lines.append(f"- {c.get('name', '未命名')}" + (f"（{desc}）" if desc else ""))
-                char_text = "当前项目已定义的角色：\n" + "\n".join(lines) + "\n"
-            if scenes:
-                lines = []
-                for s in scenes:
-                    desc = s.get("description", "") or s.get("style", "") or ""
-                    lines.append(f"- {s.get('name', '未命名')}" + (f"：{desc}" if desc else ""))
-                scene_text = "当前项目已定义的场景：\n" + "\n".join(lines) + "\n"
-        except:
-            pass
+_task_store = {}
+_task_lock = threading.Lock()
 
-    extra_context = ""
-    if char_text or scene_text:
-        extra_context = f"\n【项目设定参考】\n{char_text}{scene_text}请根据以上角色和场景设定生成分镜，prompt 中引用角色名称和场景描述。\n\n"
+def _run_llm_task(task_id: str, task_type: str, params: dict):
+    """后台执行 LLM 任务，完成后存入 _task_store"""
+    try:
+        if task_type == "analyze":
+            topic = params["topic"]
+            project_id = params.get("project_id", "")
+            char_text = ""
+            scene_text = ""
+            if project_id:
+                try:
+                    import characters as char_mod
+                    import scenes as scene_mod
+                    chars = char_mod.list_characters(project_id)
+                    scenes = scene_mod.list_scenes(project_id)
+                    if chars:
+                        lines = []
+                        for c in chars:
+                            desc = c.get("description", "") or c.get("style", "") or ""
+                            lines.append(f"- {c.get('name', '未命名')}" + (f"（{desc}）" if desc else ""))
+                        char_text = "当前项目已定义的角色：\n" + "\n".join(lines) + "\n"
+                    if scenes:
+                        lines = []
+                        for s in scenes:
+                            desc = s.get("description", "") or s.get("style", "") or ""
+                            lines.append(f"- {s.get('name', '未命名')}" + (f"：{desc}" if desc else ""))
+                        scene_text = "当前项目已定义的场景：\n" + "\n".join(lines) + "\n"
+                except:
+                    pass
+            extra_context = ""
+            if char_text or scene_text:
+                extra_context = f"\n【项目设定参考】\n{char_text}{scene_text}请根据以上角色和场景设定生成分镜，prompt 中引用角色名称和场景描述。\n\n"
+            system_prompt = "你是一个专业的视频分镜师和字幕师。根据文案生成分镜表和SRT字幕。\n首帧提示词和尾帧提示词不能与画面提示词重复，要有起始/结束的区分感。"
+            user_prompt = (
+                f"文案内容：\n{topic}\n\n"
+                f"{extra_context}"
+                f"请生成以下内容，以 JSON 格式输出：\n"
+                f'{{\n'
+                f'  "shots": [\n'
+                f'    {{\n'
+                f'      "index": 1,\n'
+                f'      "scene": "场景描述（中文，20-40字）",\n'
+                f'      "prompt": "画面提示词（英文，适合AI出图，描述该镜头最核心的画面）",\n'
+                f'      "first_frame_prompt": "起始画面（英文，强调镜头开始时的初始构图、角色入场动作、场景建立状态，与prompt有区分度，例如：Character enters from left, sunlight streams through window, wide establishing shot）",\n'
+                f'      "last_frame_prompt": "结束画面（英文，强调镜头结束时的位置变化、情绪收束、过渡到下一镜头的状态，与prompt有区分度，例如：Character now center frame, turns toward camera, soft smile, scene fades to warm bokeh）",\n'
+                f'      "duration": 3,\n'
+                f'      "framing": "景别（可选：特写/近景/中景/全景）",\n'
+                f'      "motion": "运镜（可选：固定/推轨/后拉/摇镜）",\n'
+                f'      "lighting": "光照（可选：暖调/冷白/高对比/柔和）",\n'
+                f'      "voiceover": "该镜头的旁白文本",\n'
+                f'      "video_prompt": "完整英文prompt"\n'
+                f'    }}\n'
+                f'  ],\n'
+                f'  "srt": [\n'
+                f'    {{\n'
+                f'      "index": 1,\n'
+                f'      "start": "00:00:00,000",\n'
+                f'      "end": "00:00:03,000",\n'
+                f'      "text": "对应字幕文本"\n'
+                f'    }}\n'
+                f'  ]\n'
+                f'}}\n\n'
+                f"要求：\n"
+                f"1. shots 数组每个元素对应一个镜头，prompt 用英文\n"
+                f"2. framing/motion/lighting/voiceover/video_prompt 是可选的，尽量根据剧情推断\n"
+                f"3. srt 数组每个元素对应一条字幕，时间轴与 shots 对齐\n"
+                f"4. 只输出 JSON，不要额外说明"
+            )
+            result = llm_mod.call_llm(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=system_prompt,
+                temperature=0.3,
+                max_tokens=4096,
+            )
+            if result:
+                import re
+                json_match = re.search(r'\{[\s\S]*\}', result)
+                if json_match:
+                    try:
+                        parsed = json.loads(json_match.group())
+                        shots = parsed.get("shots", [])
+                        srt = parsed.get("srt", [])
+                        for shot in shots:
+                            shot.setdefault("framing", "")
+                            shot.setdefault("motion", "")
+                            shot.setdefault("lighting", "")
+                            shot.setdefault("voiceover", "")
+                            shot.setdefault("video_prompt", "")
+                            shot.setdefault("first_frame_prompt", shot.get("prompt", ""))
+                            shot.setdefault("last_frame_prompt", shot.get("prompt", ""))
+                            shot.setdefault("first_frame_prompt", shot.get("prompt", ""))
+                            shot.setdefault("last_frame_prompt", shot.get("prompt", ""))
+                        with _task_lock:
+                            _task_store[task_id] = {"status": "completed", "result": {"shots": shots, "srt": srt, "generated": True}}
+                        return
+                    except:
+                        pass
+                with _task_lock:
+                    _task_store[task_id] = {"status": "completed", "result": {"shots": [], "srt": [], "generated": True, "raw": result}}
+                return
+            with _task_lock:
+                _task_store[task_id] = {"status": "error", "error": "LLM 分析失败"}
 
-    system_prompt = "你是一个专业的视频分镜师和字幕师。根据文案生成分镜表和SRT字幕。\n首帧提示词和尾帧提示词不能与画面提示词重复，要有起始/结束的区分感。"
-    user_prompt = (
-        f"文案内容：\n{topic}\n\n"
-        f"{extra_context}"
-        f"请生成以下内容，以 JSON 格式输出：\n"
-        f'{{\n'
-        f'  "shots": [\n'
-        f'    {{\n'
-        f'      "index": 1,\n'
-        f'      "scene": "场景描述（中文，20-40字）",\n'
-        f'      "prompt": "画面提示词（英文，适合AI出图，描述该镜头最核心的画面）",\n'
-        f'      "first_frame_prompt": "起始画面（英文，强调镜头开始时的初始构图、角色入场动作、场景建立状态，与prompt有区分度，例如：Character enters from left, sunlight streams through window, wide establishing shot）",\n'
-        f'      "last_frame_prompt": "结束画面（英文，强调镜头结束时的位置变化、情绪收束、过渡到下一镜头的状态，与prompt有区分度，例如：Character now center frame, turns toward camera, soft smile, scene fades to warm bokeh）",\n'
-        f'      "duration": 3,\n'
-        f'      "framing": "景别（可选：特写/近景/中景/全景）",\n'
-        f'      "motion": "运镜（可选：固定/推轨/后拉/摇镜）",\n'
-        f'      "lighting": "光照（可选：暖调/冷白/高对比/柔和）",\n'
-        f'      "voiceover": "该镜头的旁白文本",\n'
-        f'      "video_prompt": "完整英文prompt"\n'
-        f'    }}\n'
-        f'  ],\n'
-        f'  "srt": [\n'
-        f'    {{\n'
-        f'      "index": 1,\n'
-        f'      "start": "00:00:00,000",\n'
-        f'      "end": "00:00:03,000",\n'
-        f'      "text": "对应字幕文本"\n'
-        f'    }}\n'
-        f'  ]\n'
-        f'}}\n\n'
-        f"要求：\n"
-        f"1. shots 数组每个元素对应一个镜头，prompt 用英文\n"
-        f"2. framing/motion/lighting/voiceover/video_prompt 是可选的，尽量根据剧情推断\n"
-        f"3. srt 数组每个元素对应一条字幕，时间轴与 shots 对齐\n"
-        f"4. 只输出 JSON，不要额外说明"
-    )
+        elif task_type == "generate":
+            topic = params["topic"]
+            tone = params.get("tone", "叙事")
+            style = params.get("style", "")
+            duration = params.get("duration_seconds", 30)
+            word_count = params.get("word_count", 200)
+            prompt_id = params.get("system_prompt_id", "")
+            custom_prompt = params.get("custom_prompt", "")
+            system_prompt = prompts_mod.fill_template(prompt_id, custom_prompt)
+            if not system_prompt:
+                system_prompt = "你是一个专业的短视频文案写手。根据用户提供的主题，生成一段自然流畅的旁白文案。"
+            user_prompt = (
+                f"主题：{topic}\n"
+                f"风格：{style or '通用'}\n"
+                f"语调：{tone}\n"
+                f"目标时长：约{duration}秒\n"
+                f"目标字数：约{word_count}字\n\n"
+                f"要求：\n"
+                f"1. 生成一段短视频旁白/文案，直接输出文案文本，不要额外说明\n"
+                f"2. 文案需要通顺自然，适合配音旁白\n"
+                f"3. 文案必须接近{word_count}字左右，不足或超出太多都不合格\n"
+                f"4. 不要输出 JSON 格式，只输出纯文本文案\n"
+            )
+            result = llm_mod.call_llm(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=system_prompt,
+                temperature=0.7,
+                max_tokens=4096,
+            )
+            if result:
+                with _task_lock:
+                    _task_store[task_id] = {"status": "completed", "result": {"script": result.strip(), "generated": True}}
+            else:
+                with _task_lock:
+                    _task_store[task_id] = {"status": "error", "error": "LLM 生成失败，请检查配置"}
 
-    result = llm_mod.call_llm(
-        messages=[{"role": "user", "content": user_prompt}],
-        system_prompt=system_prompt,
-        temperature=0.3,
-        max_tokens=4096,
-    )
+        elif task_type == "modify":
+            current_script = params["topic"]
+            instruction = params.get("custom_prompt", "")
+            system_prompt = "你是一个专业的短视频文案编辑。根据用户的要求修改已有文案，保留原意的同时满足修改需求。"
+            user_prompt = (
+                f"当前文案：\n{current_script}\n\n"
+                f"修改要求：{instruction}\n\n"
+                f"要求：\n"
+                f"1. 根据修改要求改写文案\n"
+                f"2. 直接输出修改后的完整文案，不要加说明\n"
+                f"3. 保持口语化、有画面感"
+            )
+            result = llm_mod.call_llm(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=system_prompt,
+                temperature=0.7,
+                max_tokens=4096,
+            )
+            if result:
+                with _task_lock:
+                    _task_store[task_id] = {"status": "completed", "result": {"script": result.strip(), "modified": True}}
+            else:
+                with _task_lock:
+                    _task_store[task_id] = {"status": "error", "error": "LLM 修改失败，请检查配置"}
 
-    if result:
-        import re
-        json_match = re.search(r'\{[\s\S]*\}', result)
-        if json_match:
-            try:
-                parsed = json.loads(json_match.group())
-                shots = parsed.get("shots", [])
-                srt = parsed.get("srt", [])
-                # 补全新字段默认值（向前兼容）
-                for shot in shots:
-                    shot.setdefault("framing", "")
-                    shot.setdefault("motion", "")
-                    shot.setdefault("lighting", "")
-                    shot.setdefault("voiceover", "")
-                    shot.setdefault("video_prompt", "")
-                    shot.setdefault("first_frame_prompt", shot.get("prompt", ""))
-                    shot.setdefault("last_frame_prompt", shot.get("prompt", ""))
-                    shot.setdefault("first_frame_prompt", shot.get("prompt", ""))
-                    shot.setdefault("last_frame_prompt", shot.get("prompt", ""))
-                return {"shots": shots, "srt": srt, "generated": True}
-            except:
-                pass
-        return {"shots": [], "srt": [], "generated": True, "raw": result}
-    return {"shots": [], "srt": [], "generated": False, "error": "LLM 分析失败"}
+    except Exception as e:
+        with _task_lock:
+            _task_store[task_id] = {"status": "error", "error": str(e)}
+
+
+@app.post("/api/script/task")
+def create_llm_task(req: dict = Body(...)):
+    """创建异步 LLM 任务"""
+    task_type = req.get("type")
+    params = req.get("params", {})
+    if not task_type:
+        raise HTTPException(400, "请指定任务类型")
+    task_id = str(uuid.uuid4())[:12]
+    with _task_lock:
+        _task_store[task_id] = {"status": "running", "result": None}
+    thread = threading.Thread(target=_run_llm_task, args=(task_id, task_type, params), daemon=True)
+    thread.start()
+    return {"task_id": task_id, "status": "running"}
+
+
+@app.get("/api/script/task/{task_id}")
+def get_llm_task_status(task_id: str):
+    """查询异步 LLM 任务状态"""
+    with _task_lock:
+        task = _task_store.get(task_id)
+    if not task:
+        raise HTTPException(404, "任务不存在")
+    return task
 
 
 # ============================================================

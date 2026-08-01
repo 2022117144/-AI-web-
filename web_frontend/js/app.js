@@ -54,16 +54,50 @@ document.addEventListener("DOMContentLoaded", async () => {
             sel.value = savedPid;
             switchProject(savedPid);
           }
-      // 检测是否有文案但无分镜，且之前曾点击过分析，自动重新分析
-            setTimeout(async () => {
-              const script = document.getElementById("storyInput").value.trim();
-              const shotsKey = _projectKey("zctools_shots");
-              const existingShots = localStorage.getItem(shotsKey);
-              const hadAnalysis = localStorage.getItem("zctools_had_analysis_" + savedPid);
-              if (script && hadAnalysis && (!existingShots || existingShots === "[]")) {
-                analyzeScript();
-              }
-            }, 500);
+      // 检测是否有未完成的异步任务（分析/生成/修改），继续轮询
+                        setTimeout(async () => {
+                          const pid = savedPid;
+                          const taskKeys = [
+                            "zctools_task_analyze_",
+                            "zctools_task_generate_",
+                            "zctools_task_modify_",
+                          ];
+                          for (const key of taskKeys) {
+                            const taskId = localStorage.getItem(key + pid);
+                            if (taskId) {
+                              // 直接继续轮询，不重试
+                              const taskKey = key + pid;
+                              try {
+                                const resp = await api("/script/task/" + taskId);
+                                if (resp.status === "running") {
+                                                                  // 任务还在跑，显示状态并继续轮询等结果
+                                                                  _setButtonStatus(key, true);
+                                                                  _pollTask(taskId, taskKey).then(result => {
+                                                                                                      _setButtonStatus(key, false);
+                                                                                                      if (key === "zctools_task_analyze_") _handleAnalyzeResult(result);
+                                                                                                      else if (key === "zctools_task_generate_") _handleGenerateResult(result);
+                                                                                                      else if (key === "zctools_task_modify_") _handleModifyResult(result);
+                                                                                                    }).catch(e => {
+                                                                                                      _setButtonStatus(key, false);
+                                                                                                      alert("任务恢复失败: " + e.message);
+                                  });
+                                } else if (resp.status === "completed") {
+                                                                  // 任务已完成但前端没拿到结果，直接处理
+                                                                  localStorage.removeItem(taskKey);
+                                                                  _setButtonStatus(key, false);
+                                                                  if (key === "zctools_task_analyze_") _handleAnalyzeResult(resp.result);
+                                  else if (key === "zctools_task_generate_") _handleGenerateResult(resp.result);
+                                  else if (key === "zctools_task_modify_") _handleModifyResult(resp.result);
+                                } else {
+                                  localStorage.removeItem(taskKey);
+                                }
+                              } catch {
+                                localStorage.removeItem(taskKey);
+                              }
+                              break; // 一次只恢复一个任务
+                            }
+                          }
+                        }, 500);
   // 恢复上次的 Tab（刷新后保持）— 优先 URL 参数
       const urlParams = new URLSearchParams(window.location.search);
       const urlTab = urlParams.get('tab');
@@ -113,10 +147,48 @@ async function api(path, opts = {}) {
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
-  return res.json();
+    return res.json();
+  }
+
+  // ========== 异步任务轮询 ==========
+  async function _pollTask(taskId, taskKey, maxWait = 300) {
+    // 轮询任务状态，maxWait 秒超时
+    const start = Date.now();
+    while (true) {
+      const resp = await api("/script/task/" + taskId);
+      if (resp.status === "completed") {
+        localStorage.removeItem(taskKey);
+        return resp.result;
+      }
+      if (resp.status === "error") {
+        localStorage.removeItem(taskKey);
+        throw new Error(resp.error || "任务失败");
+      }
+      if ((Date.now() - start) > maxWait * 1000) {
+        // 超时不删除 taskKey，刷新后继续轮询
+        throw new Error("任务超时，请刷新页面继续等待");
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+
+// ========== 按钮状态控制 ==========
+function _setButtonStatus(key, loading) {
+  const map = {
+    "zctools_task_analyze_":   { id: "analyzeBtn",   text: "⏳ 分析中..." },
+    "zctools_task_generate_":  { id: "genScriptBtn", text: "⏳ 生成中..." },
+    "zctools_task_modify_":    { id: "modifyBtn",    text: "⏳ 修改中..." },
+  };
+  const cfg = map[key];
+  if (!cfg) return;
+  const btn = document.getElementById(cfg.id);
+  if (!btn) return;
+  btn.disabled = loading;
+  btn.textContent = loading ? cfg.text : (cfg.id === "analyzeBtn" ? "🔍 分析文案生成" : cfg.id === "genScriptBtn" ? "✨ AI 生成" : "✨ AI 修改");
 }
 
-// ========== 健康检查 ==========
+
+  // ========== 健康检查 ==========
 async function checkStatus() {
   try {
     const h = await api("/health");
@@ -221,21 +293,28 @@ async function loadProjectContent(projectId, clearIfEmpty = false) {
       hasData = true;
     }
     // 恢复分镜图片/视频数据
-    if (content.shot_data && Object.keys(content.shot_data).length > 0) {
-          localStorage.setItem(_shotDataKey(), JSON.stringify(content.shot_data));
-      hasData = true;
-    }
-    // 恢复宫格尺寸
-        if (content.grid_size && document.getElementById("gridSizeSelect")) {
-          document.getElementById("gridSizeSelect").value = content.grid_size;
+        if (content.shot_data && Object.keys(content.shot_data).length > 0) {
+              localStorage.setItem(_shotDataKey(), JSON.stringify(content.shot_data));
+          hasData = true;
         }
-        // 重新选中之前的分镜，如果不可用则默认选中第一个
-                        if (content.shots && content.shots.length > 0) {
-                          const savedShotIdx = parseInt(localStorage.getItem("zctools_selected_shot_" + projectId));
-                          const targetIdx = (savedShotIdx >= 0 && savedShotIdx < content.shots.length) ? savedShotIdx : 0;
-                          selectShot(targetIdx);
-                          changeGridSize(targetIdx);
-                        }
+        // 恢复宫格尺寸
+            if (content.grid_size && document.getElementById("gridSizeSelect")) {
+              document.getElementById("gridSizeSelect").value = content.grid_size;
+            }
+            // 重新选中之前的分镜，如果不可用则默认选中第一个
+                            if (content.shots && content.shots.length > 0) {
+                              const savedShotIdx = parseInt(localStorage.getItem("zctools_selected_shot_" + projectId));
+                              const targetIdx = (savedShotIdx >= 0 && savedShotIdx < content.shots.length) ? savedShotIdx : 0;
+                              selectShot(targetIdx);
+                              changeGridSize(targetIdx);
+                            } else if (content.shot_data && Object.keys(content.shot_data).length > 0) {
+                              // 没有分镜列表但有图片数据，选中第一个有图片的分镜
+                              const savedShotIdx = parseInt(localStorage.getItem("zctools_selected_shot_" + projectId));
+                              const keys = Object.keys(content.shot_data).map(Number).filter(k => !isNaN(k)).sort();
+                              const targetIdx = keys.includes(savedShotIdx) ? savedShotIdx : (keys[0] || 0);
+                              selectShot(targetIdx);
+                              changeGridSize(targetIdx);
+                            }
         // 清理该项目没有的数据（文案之外的数据，切换项目时用）
         if (clearIfEmpty) {
           if (!content.shots || content.shots.length === 0) {
@@ -393,7 +472,6 @@ async function analyzeScript() {
   if (!requireProject()) return;
   let script = document.getElementById("storyInput").value.trim();
   if (!script) {
-    // 如果当前 iframe 的 storyInput 为空，尝试从 localStorage 恢复文案
     script = localStorage.getItem(_projectKey("zctools_script")) || "";
     if (script) {
       document.getElementById("storyInput").value = script;
@@ -405,38 +483,45 @@ async function analyzeScript() {
   }
 
   const btn = document.getElementById("analyzeBtn");
-    btn.disabled = true; btn.textContent = "⏳ 分析中...";
-    // 标记已点击分析，刷新后自动重试
-    if (state.currentProject) {
-      localStorage.setItem("zctools_had_analysis_" + state.currentProject.project_id, "1");
-    }
+  btn.disabled = true; btn.textContent = "⏳ 分析中...";
 
   try {
-    const result = await api("/script/analyze", { body: { topic: script, style: "", tone: "叙事", project_id: state.currentProject ? state.currentProject.project_id : "" } });
-    if (result.generated) {
-          renderShots(result.shots || []);
-          renderSRT(result.srt || []);
-          localStorage.setItem(_projectKey("zctools_shots"), JSON.stringify(result.shots || []));
-                    localStorage.setItem(_projectKey("zctools_srt"), JSON.stringify(result.srt || []));
-          localStorage.setItem(_projectKey("zctools_shots_data"), JSON.stringify(result.shots || []));
-          state.currentShots = result.shots || [];
-          state.currentSRT = result.srt || [];
-                          const imgSection = document.getElementById("shotsImagesSection");
-                          if (imgSection) imgSection.style.display = "block";
-                          // 刷新九宫格显示
-                          changeGridSize();
-                          // 保存分镜数据到项目
-                if (state.currentProject) await saveProjectContent();
-                                // 清除分析重试标记
-                                localStorage.removeItem("zctools_had_analysis_" + state.currentProject.project_id);
-                                // 自动标记流水线步骤3（SRT音频+分镜提示词）为已完成
-                markPipelineStep(3, "completed");
-          } else {
-      alert("分析失败: " + (typeof result.error === 'string' ? result.error : JSON.stringify(result.error || "未知错误")));
+    // 创建异步任务
+    const task = await api("/script/task", { body: {
+      type: "analyze",
+      params: { topic: script, project_id: state.currentProject ? state.currentProject.project_id : "" }
+    }});
+    const taskId = task.task_id;
+    // 保存 task_id 到 localStorage，刷新后继续轮询
+    const taskKey = "zctools_task_analyze_" + (state.currentProject ? state.currentProject.project_id : "_default");
+    localStorage.setItem(taskKey, taskId);
+
+    // 轮询任务结果
+        const result = await _pollTask(taskId, taskKey);
+        if (result && result.generated) {
+          _handleAnalyzeResult(result);
+        } else {
+          alert("分析失败: " + (result?.error || "未知错误"));
+        }
+      } catch (e) { alert("分析失败: " + e.message); }
+      finally { btn.disabled = false; btn.textContent = "🔍 分析文案生成"; }
     }
-  } catch (e) { alert("分析失败: " + e.message); }
-  finally { btn.disabled = false; btn.textContent = "🔍 分析文案生成"; }
-}
+
+    function _handleAnalyzeResult(result) {
+      renderShots(result.shots || []);
+      renderSRT(result.srt || []);
+      localStorage.setItem(_projectKey("zctools_shots"), JSON.stringify(result.shots || []));
+      localStorage.setItem(_projectKey("zctools_srt"), JSON.stringify(result.srt || []));
+      localStorage.setItem(_projectKey("zctools_shots_data"), JSON.stringify(result.shots || []));
+      state.currentShots = result.shots || [];
+      state.currentSRT = result.srt || [];
+      const imgSection = document.getElementById("shotsImagesSection");
+      if (imgSection) imgSection.style.display = "block";
+      changeGridSize();
+      if (state.currentProject) saveProjectContent();
+      localStorage.removeItem("zctools_had_analysis_" + (state.currentProject ? state.currentProject.project_id : ""));
+      markPipelineStep(3, "completed");
+    }
 
 function renderShots(shots) {
   const grid = document.getElementById("shotsGrid");
@@ -783,8 +868,41 @@ function _shotDataKey() {
 function loadShotData(idx) {
   try {
     const all = JSON.parse(localStorage.getItem(_shotDataKey()) || "{}");
-    return all[idx] || {};
+    const data = all[idx] || {};
+    // 本地路径优先，没有才用 CDN URL
+    if (data.firstFrameLocal) {
+      // 绝对路径转为 /api/project-files/ 格式
+      data.firstFrame = _toProjectFileUrl(data.firstFrameLocal);
+    } else if (data.firstFrameUrl) {
+      data.firstFrame = data.firstFrameUrl;
+    }
+    if (data.lastFrameLocal) {
+      data.lastFrame = _toProjectFileUrl(data.lastFrameLocal);
+    } else if (data.lastFrameUrl) {
+      data.lastFrame = data.lastFrameUrl;
+    }
+    if (data.videoLocal) {
+      data.video = _toProjectFileUrl(data.videoLocal);
+    } else if (data.videoUrl) {
+      data.video = data.videoUrl;
+    }
+    return data;
   } catch { return {}; }
+}
+
+function _toProjectFileUrl(localPath) {
+  // 将本地绝对路径转为 /api/project-files/ 格式
+  // 例: D:\万象AI改\zc_backend\data\project_content\proj_xxx\图片\xxx.jpg
+  //   → /api/project-files/proj_xxx/图片/xxx.jpg
+  const marker = "project_content\\";
+  const idx = localPath.indexOf(marker);
+  if (idx >= 0) {
+    const rel = localPath.substring(idx + marker.length).replace(/\\/g, "/");
+    return "/api/project-files/" + rel;
+  }
+  // 如果已经是 /api/ 开头则直接返回
+  if (localPath.startsWith("/api/")) return localPath;
+  return localPath;
 }
 
 function saveShotData(idx, data) {
@@ -796,7 +914,44 @@ function saveShotData(idx, data) {
     if (state.currentProject) {
       saveProjectContent();
     }
+    // 检测是否有 CDN URL 需要下载到本地
+    _downloadMediaToLocal(idx, data);
   } catch {}
+}
+
+async function _downloadMediaToLocal(idx, data) {
+  if (!state.currentProject) return;
+  const pid = state.currentProject.project_id;
+  const fields = [
+    { key: "firstFrame", type: "image" },
+    { key: "lastFrame", type: "image" },
+    { key: "video", type: "video" },
+  ];
+  for (const f of fields) {
+    const url = data[f.key];
+    if (!url || url.startsWith("data:") || url.startsWith("blob:")) continue;
+    // 检查是否已下载过（本地路径以 /api/ 开头或 file: 开头则跳过）
+    if (url.startsWith("/api/") || url.startsWith("file:")) continue;
+    try {
+      const res = await api("/projects/" + pid + "/download-media", {
+        method: "POST",
+        body: { url, type: f.type }
+      });
+      if (res.local_path) {
+        // 更新 shot_data 中的路径为本地路径
+        const all = JSON.parse(localStorage.getItem(_shotDataKey()) || "{}");
+        if (!all[idx]) all[idx] = {};
+        // 存本地路径，保留原始 URL 作为备用
+        all[idx][f.key + "Local"] = res.local_path;
+        all[idx][f.key + "Url"] = url;
+        localStorage.setItem(_shotDataKey(), JSON.stringify(all));
+        // 保存到后端
+        if (state.currentProject) saveProjectContent();
+      }
+    } catch (e) {
+      console.warn("下载媒体失败:", f.key, e.message);
+    }
+  }
 }
 
 // 将分镜的首帧/尾帧占位改为"生成中..."渲染效果
@@ -983,7 +1138,6 @@ async function batchGenFrames() {
   if (!shots || shots.length === 0) { alert("没有分镜数据"); return; }
 
   window._batchCancelled = false;
-  document.getElementById("cancelBatchBtn").style.display = "inline-block";
 
   const btn = document.getElementById("batchGenBtn");
   btn.disabled = true;
@@ -1078,10 +1232,9 @@ async function batchGenFrames() {
       if (state.currentProject) await saveProjectContent();
 
       btn.disabled = false;
-          btn.textContent = originalText;
-          document.getElementById("cancelBatchBtn").style.display = "none";
-              window._batchCancelled = false;
-              alert(`批量生成完成！成功 ${success} 张，失败 ${fail} 张`);
+                btn.textContent = originalText;
+                window._batchCancelled = false;
+                    alert(`批量生成完成！成功 ${success} 张，失败 ${fail} 张`);
           }
 
           /**
@@ -1125,11 +1278,10 @@ async function batchGenFrames() {
 
             // 恢复批量生成按钮
             const batchBtn = document.getElementById("batchGenBtn");
-            batchBtn.disabled = false;
-            batchBtn.textContent = "🖼 批量生成所有图片";
-            document.getElementById("cancelBatchBtn").style.display = "none";
+                        batchBtn.disabled = false;
+                        batchBtn.textContent = "🖼 批量生成所有图片";
 
-            alert("已暂停批量生成");
+                        alert("已暂停批量生成");
                       }
 
                       /**
@@ -1647,21 +1799,35 @@ async function generateScript() {
   const wordCount = wordCountRaw ? parseInt(wordCountRaw) || 0 : 0;
   const promptId = document.getElementById("promptSelector").value;
   btn.disabled = true; btn.textContent = "⏳ 生成中...";
+
   try {
-    const result = await api("/script/generate", { body: { topic, style: "", tone, duration_seconds: 30, word_count: wordCount, system_prompt_id: promptId } });
-    if (result.generated && result.script) {
-                  document.getElementById("storyInput").value = result.script;
-                  localStorage.setItem(_projectKey("zctools_script"), result.script);
-                  updateCharCount();
-                  // 保存到后端，确保分镜/流水线能读到
-              if (state.currentProject) await saveProjectContent();
-              // 自动标记流水线步骤2（文案生成）为已完成
-              markPipelineStep(2, "completed");
-            }
-    else alert("生成失败: " + (result.error || "未知错误"));
-  } catch (e) { alert("生成失败: " + e.message); }
-  finally { btn.disabled = false; btn.textContent = "✨ AI 生成"; }
-}
+    // 创建异步任务
+    const task = await api("/script/task", { body: {
+      type: "generate",
+      params: { topic, tone, style: "", duration_seconds: 30, word_count: wordCount, system_prompt_id: promptId }
+    }});
+    const taskId = task.task_id;
+    const taskKey = "zctools_task_generate_" + (state.currentProject ? state.currentProject.project_id : "_default");
+    localStorage.setItem(taskKey, taskId);
+
+    // 轮询结果
+        const result = await _pollTask(taskId, taskKey);
+        if (result && result.generated && result.script) {
+          _handleGenerateResult(result);
+        } else {
+          alert("生成失败: " + (result?.error || "未知错误"));
+        }
+      } catch (e) { alert("生成失败: " + e.message); }
+      finally { btn.disabled = false; btn.textContent = "✨ AI 生成"; }
+    }
+
+    function _handleGenerateResult(result) {
+      document.getElementById("storyInput").value = result.script;
+      localStorage.setItem(_projectKey("zctools_script"), result.script);
+      updateCharCount();
+      if (state.currentProject) saveProjectContent();
+      markPipelineStep(2, "completed");
+    }
 
 // ========== AI 修改文案 ==========
 async function modifyScript() {
@@ -1672,18 +1838,32 @@ async function modifyScript() {
   const btn = document.getElementById("modifyBtn");
   btn.disabled = true; btn.textContent = "⏳ 修改中...";
   try {
-    const result = await api("/script/modify", { body: { topic: currentScript, custom_prompt: instruction } });
-    if (result.modified && result.script) {
-              document.getElementById("storyInput").value = result.script;
-              localStorage.setItem(_projectKey("zctools_script"), result.script);
-              updateCharCount();
-              // 保存到后端
-          if (state.currentProject) await saveProjectContent();
+    // 创建异步任务
+    const task = await api("/script/task", { body: {
+      type: "modify",
+      params: { topic: currentScript, custom_prompt: instruction }
+    }});
+    const taskId = task.task_id;
+    const taskKey = "zctools_task_modify_" + (state.currentProject ? state.currentProject.project_id : "_default");
+    localStorage.setItem(taskKey, taskId);
+
+    // 轮询结果
+        const result = await _pollTask(taskId, taskKey);
+        if (result && result.modified && result.script) {
+          _handleModifyResult(result);
+        } else {
+          alert("修改失败: " + (result?.error || "未知错误"));
         }
-    else alert("修改失败: " + (result.error || "未知错误"));
-  } catch (e) { alert("修改失败: " + e.message); }
-  finally { btn.disabled = false; btn.textContent = "✨ AI 修改"; }
-}
+      } catch (e) { alert("修改失败: " + e.message); }
+      finally { btn.disabled = false; btn.textContent = "✨ AI 修改"; }
+    }
+
+    function _handleModifyResult(result) {
+      document.getElementById("storyInput").value = result.script;
+      localStorage.setItem(_projectKey("zctools_script"), result.script);
+      updateCharCount();
+      if (state.currentProject) saveProjectContent();
+    }
 
 // ========== 系统提示词 ==========
 async function loadPrompts() {
