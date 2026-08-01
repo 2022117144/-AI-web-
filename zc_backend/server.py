@@ -1649,6 +1649,63 @@ def _poll_photogpt_result(job_id: int, max_poll: int = 4) -> str:
             print(f"轮询图片结果异常 (job {job_id}): {e}")
     return ""
 
+
+# ============================================================
+# API: 批量生成图片（避免浏览器并发限制）
+# ============================================================
+import asyncio as _asyncio
+import uuid as _uuid
+
+_batch_tasks: dict = {}
+
+
+class BatchFrameRequest(BaseModel):
+    project_id: str = ""
+    aspect_ratio: str = "16:9"
+    frames: list = []
+    reference_images: list = []
+
+
+@app.post("/api/batch-generate-frames")
+async def batch_generate_frames(req: BatchFrameRequest):
+    task_id = _uuid.uuid4().hex[:12]
+    frames = req.frames or []
+    if not frames:
+        raise HTTPException(400, "frames 不能为空")
+
+    async def _run():
+        async def _gen_one(frame):
+            try:
+                f_req = FrameGenRequest(
+                    prompt=frame.get("prompt", ""),
+                    aspect_ratio=req.aspect_ratio,
+                    mode=frame.get("mode", "first_frame"),
+                    project_id=req.project_id,
+                    shot_idx=frame.get("shot_idx", 0),
+                    reference_images=req.reference_images,
+                )
+                result = await generate_frame(f_req)
+                return {"shot_idx": frame.get("shot_idx"), "mode": frame.get("mode"), "success": result.get("success"), "image_url": result.get("image_url", ""), "error": result.get("error", "")}
+            except Exception as e:
+                return {"shot_idx": frame.get("shot_idx"), "mode": frame.get("mode"), "success": False, "image_url": "", "error": str(e)}
+
+        results = await _asyncio.gather(*[_gen_one(f) for f in frames])
+        _batch_tasks[task_id] = {"status": "completed", "results": results, "total": len(frames)}
+
+    _batch_tasks[task_id] = {"status": "running", "results": [], "total": len(frames)}
+    _asyncio.ensure_future(_run())
+
+    return {"task_id": task_id, "total": len(frames), "status": "running"}
+
+
+@app.get("/api/batch-generate-frames/{task_id}")
+async def batch_generate_frames_status(task_id: str):
+    task = _batch_tasks.get(task_id)
+    if not task:
+        raise HTTPException(404, "任务不存在")
+    return task
+
+
 @app.post("/api/generate-video")
 async def generate_video(req: VideoGenRequest):
     """单段分镜视频生成 — 调 insmind（异步轮询，不阻塞其他请求）"""
