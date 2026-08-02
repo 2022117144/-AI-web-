@@ -415,9 +415,10 @@ def get_pipeline_status(project_id: str):
 
     # 步骤3: 图片 — 检查图片数量是否满足分镜需求
     # 规则：第一个分镜需要首帧+尾帧（2张），其余分镜各1张尾帧，合计 shots_count + 1 张
+    # 排除 _prev 备份文件
     img_dir = proj_dir / "图片"
     if img_dir.exists():
-        imgs = [f for f in img_dir.iterdir() if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")]
+        imgs = [f for f in img_dir.iterdir() if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") and not f.name.endswith("_prev.png") and not f.name.endswith("_prev.jpg") and not f.name.endswith("_prev.jpeg") and not f.name.endswith("_prev.webp")]
         # 获取分镜数量
         shots_file = proj_dir / "视频提示词" / "shots.json"
         shot_count = 0
@@ -429,11 +430,11 @@ def get_pipeline_status(project_id: str):
         if shot_count > 0 and len(imgs) >= needed:
             steps[2] = True
 
-    # 步骤4: 视频 — 检查视频数量是否等于分镜数
+# 步骤4: 视频 — 检查视频数量是否等于分镜数（排除 _prev 备份文件）
     video_dir = proj_dir / "视频"
     if video_dir.exists():
-        videos = [f for f in video_dir.iterdir() if f.suffix.lower() in (".mp4", ".webm", ".mov")]
-        # 获取分镜数量
+        videos = [f for f in video_dir.iterdir() if f.suffix.lower() in (".mp4", ".webm", ".mov") and not f.name.endswith("_prev.mp4") and not f.name.endswith("_prev.webm") and not f.name.endswith("_prev.mov")]
+    # 获取分镜数量
         shots_file = proj_dir / "视频提示词" / "shots.json"
         shot_count = 0
         if shots_file.exists():

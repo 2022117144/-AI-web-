@@ -1770,11 +1770,23 @@ async function runPipeline() {
         await analyzeScript();
         // analyzeScript 内部会调 markPipelineStep(2, "completed")
       } else if (i === 2) {
-        // 步骤3: 图片 — 待实现
-        markPipelineStep(3, "completed");
+                    // 步骤3: 图片 — 调用批量生成图片
+                    await batchGenFrames();
+                    // 执行后重新检查图片是否足够
+                    const status3 = await api("/projects/" + projectId + "/pipeline-status");
+                    if (!status3.steps[2]) {
+                      throw new Error("图片生成不足，无法继续下一步");
+                    }
+                    markPipelineStep(3, "completed");
       } else if (i === 3) {
-        // 步骤4: 视频 — 待实现
-        markPipelineStep(4, "completed");
+                    // 步骤4: 视频 — 调用一键生成视频
+                    await batchGenVideos();
+                    // 执行后重新检查视频是否足够
+                    const status4 = await api("/projects/" + projectId + "/pipeline-status");
+                    if (!status4.steps[3]) {
+                      throw new Error("视频生成不足，无法继续下一步");
+                    }
+                    markPipelineStep(4, "completed");
       } else if (i === 4) {
         // 步骤5: 合成 — 待实现
         markPipelineStep(5, "completed");
