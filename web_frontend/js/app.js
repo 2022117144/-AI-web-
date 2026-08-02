@@ -973,12 +973,13 @@ function saveShotData(idx, data) {
     const all = JSON.parse(localStorage.getItem(_shotDataKey()) || "{}");
     all[idx] = { ...(all[idx] || {}), ...data };
     localStorage.setItem(_shotDataKey(), JSON.stringify(all));
-    // 自动保存到后端
-    if (state.currentProject) {
-      saveProjectContent();
-    }
-    // 检测是否有 CDN URL 需要下载到本地
-    _downloadMediaToLocal(idx, data);
+    // 先检测是否有 CDN URL 需要下载到本地（下载完后会更新路径）
+    _downloadMediaToLocal(idx, data).then(function() {
+      // 下载完成后保存到后端（此时路径已更新为本地路径）
+      if (state.currentProject) {
+        saveProjectContent();
+      }
+    });
   } catch (e) {
     console.warn("saveShotData error:", e);
   }

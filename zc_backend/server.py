@@ -387,6 +387,19 @@ def get_project_content(project_id: str):
     shot_data_file = proj_dir / "视频提示词" / "shot_data.json"
     if shot_data_file.exists():
         data["shot_data"] = load_json(shot_data_file, {})
+        # 自动将 shot_data 中的 CDN URL 替换为本地路径
+        img_dir = proj_dir / "图片"
+        if img_dir.exists():
+            local_files = {f.name for f in img_dir.iterdir() if f.is_file()}
+            for entry in data["shot_data"].values():
+                for field in ("firstFrame", "lastFrame"):
+                    url = entry.get(field, "")
+                    if url and "cdn.static-boost.com" in url:
+                        fname = url.rsplit("/", 1)[-1]
+                        if fname in local_files:
+                            local_url = f"/api/project-files/{project_id}/图片/{fname}"
+                            entry[field] = local_url
+                            entry[f"{field}Local"] = f"{project_id}\图片\{fname}"
     return data
 
 
