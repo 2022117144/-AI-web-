@@ -1892,8 +1892,7 @@ def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix
                 prev_file.unlink()
             local_file.rename(prev_file)
         proxy_url = "http://127.0.0.1:7897"
-        proxies = {"all://": proxy_url} if proxy_url else None
-        with _httpx.Client(proxies=proxies, timeout=60, follow_redirects=True, trust_env=False) as client:
+        with _httpx.Client(proxy=proxy_url, timeout=60, follow_redirects=True, trust_env=False) as client:
             resp = client.get(url,
                 headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"})
         if resp.status_code == 200:

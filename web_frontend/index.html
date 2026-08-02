@@ -619,17 +619,27 @@ function sbRender() {
                           '<td class="sb-col-asset"><div class="sb-asset-name" onclick="sbPickAsset(' + i + ',\'scene\')">' + (s.scene ? '<span class="sb-asset-text">' + s.scene + '</span>' : '<span class="sb-asset-placeholder">添加场景</span>') + '</div></td>' +
                           '<td class="sb-col-asset"><div class="sb-asset-name" onclick="sbPickAsset(' + i + ',\'prop\')">' + (s.prop ? '<span class="sb-asset-text">' + s.prop + '</span>' : '<span class="sb-asset-placeholder">添加道具</span>') + '</div></td>' +
       '<td class="sb-col-action"><button class="sb-btn" onclick="sbGenVoice(' + i + ')">🎤 配音</button></td>' +
-            '<td class="sb-col-frame">' +
-'<div class="sb-frame-cell">' +
-'<div class="sb-frame-btns">' +
-'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbGenFirstFrame(' + i + ')" title="生成首帧">✨</button>' +
-'<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbUploadFrame(' + i + ', \'first\')" title="上传图片">📁</button>' +
-'</div>' +
-'<div class="sb-frame-preview">' +
-'<div class="sb-frame-img" id="sbFirstImg_' + i + '">' + (s.firstFrame ? '<img src="'+s.firstFrame+'" class="sb-frame-thumb">' : '<div class="sb-frame-placeholder">待生成</div>') + '</div>' +
-'</div>' +
-'</div>' +
-'</td>' +
+            (i === 0 ? '<td class="sb-col-frame">' +
+            '<div class="sb-frame-cell">' +
+            '<div class="sb-frame-btns">' +
+            '<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbGenFirstFrame(' + i + ')" title="生成首帧">✨</button>' +
+            '<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbUploadFrame(' + i + ', \'first\')" title="上传图片">📁</button>' +
+            '</div>' +
+            '<div class="sb-frame-preview">' +
+            '<div class="sb-frame-img" id="sbFirstImg_' + i + '">' + (s.firstFrame ? '<img src="'+s.firstFrame+'" class="sb-frame-thumb">' : '<div class="sb-frame-placeholder">待生成</div>') + '</div>' +
+            '</div>' +
+            '</div>' +
+            '</td>' : '<td class="sb-col-frame">' +
+            '<div class="sb-frame-cell">' +
+            '<div class="sb-frame-btns">' +
+            '<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbGenFirstFrame(' + i + ')" title="生成首帧">✨</button>' +
+            '<button class="sb-btn sb-btn-sm" onclick="event.stopPropagation();sbUploadFrame(' + i + ', \'first\')" title="上传图片">📁</button>' +
+            '</div>' +
+            '<div class="sb-frame-preview">' +
+            '<div class="sb-frame-img" id="sbFirstImg_' + i + '"><div class="sb-frame-placeholder" style="color:#999;font-size:11px">继承上一镜</div></div>' +
+            '</div>' +
+            '</div>' +
+            '</td>') +
             '<td class="sb-col-frame">' +
 '<div class="sb-frame-cell">' +
 '<div class="sb-frame-btns">' +

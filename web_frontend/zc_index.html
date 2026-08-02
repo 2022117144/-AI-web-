@@ -123,12 +123,12 @@ body{background:var(--bg)}
         <div class="shots-title">📋 分镜列表</div>
         <div class="shots-actions">
           <button class="btn btn-sm btn-primary" onclick="analyzeScript()" id="analyzeBtn">🔍 分析文案生成</button>
-          <button class="btn btn-sm btn-primary" onclick="batchGenFrames()" id="batchGenBtn" style="margin-left:4px;border-right:none;border-radius:4px 0 0 4px">🖼 批量生成所有图片</button>
+          <button class="btn btn-sm btn-primary" onclick="return batchGenFrames()" id="batchGenBtn" style="margin-left:4px;border-right:none;border-radius:4px 0 0 4px">🖼 批量生成所有图片</button>
           <div style="display:inline-flex;align-items:center;vertical-align:middle">
             <button class="btn btn-sm btn-danger" onclick="cancelBatchFrames()" id="cancelBatchBtn" style="border-left:none;border-radius:0 4px 4px 0">⏹ 暂停</button>
             <div style="position:absolute;width:16px;height:1px;background:var(--text2);transform:translateY(-14px)"></div>
           </div>
-          <button class="btn btn-sm btn-primary" onclick="batchGenVideos()" id="batchVideoBtn" style="margin-left:4px">🎬 一键生成视频</button>
+          <button class="btn btn-sm btn-primary" onclick="return batchGenVideos()" id="batchVideoBtn" style="margin-left:4px">🎬 一键生成视频</button>
         </div>
       </div>
       <div class="shots-srt-bar" id="srtBar">
