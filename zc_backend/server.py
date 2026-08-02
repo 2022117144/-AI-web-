@@ -1408,6 +1408,12 @@ def update_pipeline_step(run_id: str, req: dict = Body(...)):
         r["steps"] = steps
         r["status"] = req.get("run_status", r.get("status", "pending"))
         save_json(pl.RUNS_FILE, runs)
+        # 同步到内存字典（将 dict 转回 PipelineRun 对象）
+        _run = pl.PipelineRun(project_id=r.get("project_id", ""))
+        _run.run_id = run_id
+        _run.steps = r.get("steps", [])
+        _run.status = r.get("status", "idle")
+        pl._runs[run_id] = _run
         return {"status": "ok", "run": r}
     # 创建新运行记录
     run = pl.PipelineRun(project_id=req.get("project_id", ""))
@@ -1421,6 +1427,8 @@ def update_pipeline_step(run_id: str, req: dict = Body(...)):
                 run.steps[i]["status"] = "completed"
     if 0 <= step_idx < len(run.steps):
         run.steps[step_idx]["status"] = status
+    # 同步到内存和文件
+    pl.save_run(run)
     return {"status": "ok", "run": run.to_dict()}
 
 @app.get("/api/pipeline/runs")

@@ -313,11 +313,15 @@ async function loadProjectContent(projectId, clearIfEmpty = false) {
   try {
     const content = await api("/projects/" + projectId + "/content");
     // 恢复文案
-    if (content.script_text) {
-      document.getElementById("storyInput").value = content.script_text;
-      localStorage.setItem(_projectKey("zctools_script"), content.script_text);
-      hasData = true;
-    }
+        if (content.script_text) {
+          document.getElementById("storyInput").value = content.script_text;
+          localStorage.setItem(_projectKey("zctools_script"), content.script_text);
+          hasData = true;
+        } else {
+          // 新项目没有文案，清空输入框
+          document.getElementById("storyInput").value = "";
+          localStorage.removeItem(_projectKey("zctools_script"));
+        }
     // 恢复分镜
     if (content.shots && content.shots.length > 0) {
       localStorage.setItem(_projectKey("zctools_shots"), JSON.stringify(content.shots));
@@ -1422,8 +1426,8 @@ async function batchGenFrames() {
                                                                                                   return;
                                                                                                 }
                                                                                                 if (availableAccounts < needed) {
-                                                  alert(`insMind 可用账号不足：需要 ${needed} 个账号，当前可用 ${availableAccounts} 个\n请先注册新账号或等待额度重置`);
-                                                  return;
+                                                                                                                                                  alert(`insMind 可用账号不足：需要 ${needed} 个账号，当前可用 ${availableAccounts} 个\n请先注册新账号或等待额度重置`);
+                                                                                                                                                  throw new Error("insMind 可用账号不足");
                                                 }
 
                                                 const btn = document.getElementById("batchVideoBtn");
@@ -1647,7 +1651,8 @@ async function loadPipelineSteps() {
     // 加载当前项目的最新流水线运行状态
     if (state.currentProject) {
       try {
-        var runs = await api("/pipeline/runs?project_id=" + state.currentProject);
+        var pid = typeof state.currentProject === "string" ? state.currentProject : (state.currentProject.project_id || "");
+        var runs = await api("/pipeline/runs?project_id=" + pid);
         if (Array.isArray(runs) && runs.length > 0) {
           state.pipelineRun = runs[0];
         }
@@ -1733,13 +1738,13 @@ async function runPipeline() {
   stopBtn.style.display = "inline-block";
 
   try {
-    // 先检查当前项目各步骤完成状态
-    const status = await api("/projects/" + projectId + "/pipeline-status");
-    const steps = status.steps || [false, false, false, false, false, false];
-    const stepLabels = ["文案", "分镜+字幕+音频", "图片", "视频", "合成", "发送"];
+      // 先检查当前项目各步骤完成状态
+      const status = await api("/projects/" + projectId + "/pipeline-status");
+            var steps = status.steps || [false, false, false, false, false, false];
+            const stepLabels = ["文案", "分镜+字幕+音频", "图片", "视频", "合成", "发送"];
 
-    // 找到第一个未完成的步骤
-    let startFrom = steps.findIndex((s) => !s);
+      // 找到第一个未完成的步骤
+      var startFrom = steps.findIndex((s) => !s);
     if (startFrom === -1) {
       alert("所有步骤已完成！");
       syncPipelineButtons();
@@ -1757,14 +1762,12 @@ async function runPipeline() {
       stopBtn.textContent = "⏹ 步骤" + (i + 1) + "/6 " + stepLabels[i] + "...";
 
       if (i === 0) {
-        // 步骤1: 文案 — 检查输入框是否有文案
-        const scriptText = document.getElementById("storyInput")?.value?.trim() || "";
-        if (!scriptText) {
-          alert("请先在文案 Tab 生成或输入文案内容");
-          switchTab("script");
-          return;
-        }
-        markPipelineStep(1, "completed");
+              // 步骤1: 文案 — 检查输入框是否有文案
+              const scriptText = document.getElementById("storyInput")?.value?.trim() || "";
+              if (!scriptText) {
+                throw new Error("请先输入文案内容");
+              }
+              markPipelineStep(1, "completed");
       } else if (i === 1) {
         // 步骤2: 分镜+字幕+音频 — 调用分析文案生成
         await analyzeScript();
@@ -1797,7 +1800,15 @@ async function runPipeline() {
     }
 
     alert("流水线执行完成！");
-  } catch (e) { alert("流水线执行失败: " + e.message); }
+      } catch (e) {
+        // 标记当前步骤为失败（显示红色边框）
+        var errStep = startFrom;
+        for (var si = startFrom; si < 6; si++) {
+          if (!steps[si]) { errStep = si; break; }
+        }
+        markPipelineStep(errStep + 1, "error");
+        alert("流水线执行失败: " + e.message);
+      }
   finally { syncPipelineButtons(); }
 }
 

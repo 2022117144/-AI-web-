@@ -375,10 +375,10 @@ select:focus, input:focus { border-color: var(--accent); }
   border-radius: var(--radius-sm);
   transition: all 0.3s;
 }
-.pipe-step.pipe-completed { border-color: var(--green); background: #0a2e1a; box-shadow: 0 0 12px rgba(46,204,113,0.4); }
-.pipe-step.pipe-running { border-color: var(--accent); background: #1a0a3e; box-shadow: 0 0 12px rgba(108,92,231,0.4); animation: pipeGlow 1.5s ease-in-out infinite alternate; }
-@keyframes pipeGlow { from { box-shadow: 0 0 8px rgba(108,92,231,0.3); } to { box-shadow: 0 0 20px rgba(108,92,231,0.6); } }
-.pipe-step.pipe-error { border-color: var(--red); background: #2e0a0a; box-shadow: 0 0 12px rgba(231,76,60,0.4); }
+.pipe-step.pipe-completed { border-color: var(--green); border-width: 2px; box-shadow: 0 0 16px rgba(46,204,113,0.5); }
+.pipe-step.pipe-running { border-color: #fff; border-width: 2px; box-shadow: 0 0 20px rgba(255,255,255,0.4); animation: pipeWhiteGlow 0.8s ease-in-out infinite alternate; }
+@keyframes pipeWhiteGlow { from { box-shadow: 0 0 8px rgba(255,255,255,0.2); } to { box-shadow: 0 0 28px rgba(255,255,255,0.6); } }
+.pipe-step.pipe-error { border-color: var(--red); border-width: 2px; box-shadow: 0 0 16px rgba(231,76,60,0.5); }
 .pipe-step.pipe-skipped { opacity: 0.5; }
 .pipe-step-num {
   width: 26px; height: 26px;
