@@ -52,7 +52,7 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
       <button class="wx-nav-btn" data-wx="shots"><span class="icon">🎬</span> 分镜</button>
             <button class="wx-nav-btn" data-wx="storyboard"><span class="icon">📋</span> 分镜表</button>
             <button class="wx-nav-btn" data-wx="pipeline"><span class="icon">⚙️</span> 流水线</button>
-      <button class="wx-nav-btn" data-wx="aitools"><span class="icon">📦</span> AI工具箱</button>
+      <button class="wx-nav-btn" data-wx="aitools"><span class="icon">📦</span> 资源管理</button>
       <div class="wx-nav-sep"></div>
       <div class="wx-nav-bottom">
         <button class="wx-nav-btn" data-wx="settings"><span class="icon">⚙️</span> 设置</button>
@@ -92,7 +92,8 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-shrink:0">
             <span style="font-size:14px;color:var(--text);font-weight:600">📂 项目</span>
             <button class="wx-btn" onclick="newProject()" style="background:#007acc;color:#fff;border:none;padding:5px 12px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">＋ 新建项目</button>
-            <label class="wx-btn" style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:5px 10px;font-size:12px;margin-left:4px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()" style="accent-color:#007acc;width:13px;height:13px;cursor:pointer"> 全选</label>
+                        <label class="wx-btn" style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:5px 10px;font-size:12px;margin-left:4px"><input type="checkbox" id="autoName" style="accent-color:#007acc;width:13px;height:13px;cursor:pointer"> 自动命名</label>
+                        <label class="wx-btn" style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:5px 10px;font-size:12px;margin-left:4px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()" style="accent-color:#007acc;width:13px;height:13px;cursor:pointer"> 全选</label>
             <button class="wx-btn" onclick="batchDelete()" style="color:#e74c3c;border-color:var(--border);padding:5px 12px;font-size:12px;white-space:nowrap">批量删除</button>
           </div>
           <div id="batchProjectList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:1px">
@@ -406,7 +407,19 @@ async function loadProjects() {
 
 async function newProject() {
   try {
-    await fetch(API_BASE + '/api/projects', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_name:'未命名'})});
+    var name = '未命名';
+    if (document.getElementById('autoName').checked) {
+      // 获取当前最大数字项目名
+      var r = await fetch(API_BASE + '/api/projects');
+      var list = await r.json();
+      var maxNum = 0;
+      list.forEach(function(p){
+        var n = parseInt(p.project_name, 10);
+        if (!isNaN(n) && n > maxNum) maxNum = n;
+      });
+      name = String(maxNum + 1);
+    }
+    await fetch(API_BASE + '/api/projects', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_name:name})});
     loadProjects();
   } catch(e) { alert('创建失败: '+e.message); }
 }

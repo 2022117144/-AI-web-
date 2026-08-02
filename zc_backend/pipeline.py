@@ -28,25 +28,18 @@ import llm as llm_mod
 # 标准步骤列表（按顺序执行）
 PIPELINE_STEPS = [
     {
-        "name": "style_prompt",
-        "label": "风格提示词",
-        "description": "选择/注入视觉风格锚点（可选）",
-        "optional": True,
-        "inputs": ["style_preset_id", "style_anchor", "character_anchor"],
+        "name": "script",
+        "label": "文案",
+        "description": "用户输入文案脚本",
+        "optional": False,
+        "inputs": ["script_text"],
     },
     {
-        "name": "script_audio",
-        "label": "文案 + STR音频",
-        "description": "输入文案脚本，生成旁白/配音音频",
+        "name": "storyboard_with_audio",
+        "label": "分镜提示词 + STR字幕 + 音频",
+        "description": "从文案生成分镜提示词 + STR字幕 + 旁白配音音频",
         "optional": False,
-        "inputs": ["script_text", "voice_name"],
-    },
-    {
-        "name": "storyboard_prompts",
-        "label": "分镜提示词",
-        "description": "从文案+风格生成逐镜头画面描述",
-        "optional": False,
-        "inputs": ["script_text", "shot_count", "style_anchor", "characters"],
+        "inputs": ["script_text", "shot_count", "characters", "voice_name"],
     },
     {
         "name": "photogpt_images",
@@ -99,6 +92,20 @@ def _stub_handler(project_data: dict, step_config: dict) -> dict:
     }
 
 # 内置"已就绪"handler（不需要外部 API 的步骤）
+def _script_handler(project_data: dict, step_config: dict) -> dict:
+    """文案步骤 — 文案已在前端完成，这里只是确认"""
+    script_text = step_config.get("script_text", "")
+    if not script_text:
+        script_text = project_data.get("original_full_script", "") or project_data.get("original_story_desc", "")
+    if not script_text:
+        script_text = project_data.get("original_voiceover_text", "") or project_data.get("rewritten_voiceover_text", "")
+    return {
+        "success": True,
+        "output": {"script_text": script_text},
+        "error": "",
+    }
+
+
 def _style_prompt_handler(project_data: dict, step_config: dict) -> dict:
     style_id = step_config.get("style_preset_id", "")
     style_anchor = step_config.get("style_anchor", "")
@@ -234,8 +241,8 @@ def _script_audio_handler(project_data: dict, step_config: dict) -> dict:
             "error": "",
         }
 
-def _storyboard_prompts_handler(project_data: dict, step_config: dict) -> dict:
-    """用 LLM 从文案+风格生成分镜提示词列表"""
+def _storyboard_with_audio_handler(project_data: dict, step_config: dict) -> dict:
+    """合并步骤：用 LLM 生成分镜提示词 + 同时生成旁白音频"""
     script_text = step_config.get("script_text", "")
     if not script_text:
         script_text = project_data.get("original_full_script", "") or project_data.get("original_story_desc", "")
@@ -243,18 +250,14 @@ def _storyboard_prompts_handler(project_data: dict, step_config: dict) -> dict:
         script_text = project_data.get("original_voiceover_text", "") or project_data.get("rewritten_voiceover_text", "")
 
     shot_count = step_config.get("shot_count", 5)
-    style_anchor = step_config.get("style_anchor", "")
-    style_preset_id = step_config.get("style_preset_id", "")
-
-    # 角色数据（可选）
     characters = step_config.get("characters", [])
+    voice_name = step_config.get("voice_name", "zh-CN-XiaoxiaoNeural")
 
     if not script_text:
-        return {"success": True, "output": {"shots": [], "shot_count": 0, "message": "无文案内容"}, "error": ""}
+        return {"success": True, "output": {"shots": [], "shot_count": 0, "audio_path": "", "srt_path": "", "message": "无文案内容"}, "error": ""}
 
-    # 用 LLM 生成分镜（带扩展字段）
+    # ========== 1. LLM 生成分镜提示词 ==========
     system_prompt = "你是一个专业的视频分镜师。根据用户提供的文案，生成结构化的分镜表。"
-
     user_prompt = (
         f"文案内容：\n{script_text}\n\n"
         f"请将以上文案拆分为 {shot_count} 个分镜镜头，每个镜头包含以下字段：\n"
@@ -270,8 +273,6 @@ def _storyboard_prompts_handler(project_data: dict, step_config: dict) -> dict:
     if characters:
         char_info = "; ".join([f"{c.get('name','')}: {c.get('style','')}" for c in characters])
         user_prompt += f"\n角色设定：\n{char_info}\n请将角色特征融入每个镜头的画面描述中。\n"
-    if style_anchor:
-        user_prompt += f"\n视觉风格锚点：{style_anchor}\n请将风格融入每个镜头的画面描述中。\n"
 
     user_prompt += (
         f"\n以 JSON 格式输出，格式为：\n"
@@ -291,7 +292,6 @@ def _storyboard_prompts_handler(project_data: dict, step_config: dict) -> dict:
     shots = []
     if result:
         import re
-        # 尝试提取 JSON 数组
         json_match = re.search(r'\[[\s\S]*\]', result)
         if json_match:
             try:
@@ -303,7 +303,6 @@ def _storyboard_prompts_handler(project_data: dict, step_config: dict) -> dict:
                         "prompt": item.get("prompt", ""),
                         "enhanced_prompt": item.get("prompt", ""),
                         "duration": item.get("duration", 3),
-                        # 扩展字段（可选，默认空值向下兼容）
                         "framing": item.get("framing", ""),
                         "motion": item.get("motion", ""),
                         "lighting": item.get("lighting", ""),
@@ -325,20 +324,38 @@ def _storyboard_prompts_handler(project_data: dict, step_config: dict) -> dict:
         for i, s in enumerate(sentences[:shot_count]):
             shots.append({
                 "index": i,
-                "scene": s,
-                "prompt": s,
-                "enhanced_prompt": "",
-                "duration": 3,
-                "framing": "",
-                "motion": "",
-                "lighting": "",
-                "voiceover": s,
-                "video_prompt": "",
-                "dialogue": [],
-                "actions": [],
-                "start_sec": i * 3,
-                "end_sec": (i + 1) * 3,
+                "scene": s, "prompt": s, "enhanced_prompt": "",
+                "duration": 3, "framing": "", "motion": "", "lighting": "",
+                "voiceover": s, "video_prompt": "",
+                "dialogue": [], "actions": [],
+                "start_sec": i * 3, "end_sec": (i + 1) * 3,
             })
+
+    # ========== 2. TTS 生成旁白音频 ==========
+    # 映射语音名
+    voice_map = {
+        "zh_female_vv_uranus_bigtts": "zh-CN-XiaoxiaoNeural",
+        "zh_female_2024_songs_female": "zh-CN-XiaoyiNeural",
+        "zh_female_2024_conversational_female": "zh-CN-XiaoxiaoNeural",
+        "zh_female_2024_story_female": "zh-CN-XiaoxiaoNeural",
+        "zh_male_2024_story_male": "zh-CN-YunxiNeural",
+    }
+    mapped_voice = voice_map.get(voice_name, voice_name)
+
+    # 用完整文案生成旁白音频（不拆分）
+    tts_result = _call_edge_tts(script_text, mapped_voice)
+    audio_path = ""
+    duration_ms = 0
+    tts_skipped = False
+    if tts_result.get("success"):
+        tts_output = tts_result.get("output", {})
+        if tts_output.get("skipped"):
+            tts_skipped = True
+        else:
+            audio_path = tts_output.get("audio_path", "")
+            duration_ms = tts_output.get("duration_ms", 0)
+    else:
+        tts_skipped = True
 
     return {
         "success": True,
@@ -346,6 +363,12 @@ def _storyboard_prompts_handler(project_data: dict, step_config: dict) -> dict:
             "shots": shots,
             "shot_count": len(shots),
             "llm_generated": bool(result),
+            "script_text": script_text,
+            "voice_name": mapped_voice,
+            "audio_path": audio_path,
+            "srt_path": "",
+            "duration_ms": duration_ms,
+            "tts_skipped": tts_skipped,
         },
         "error": "",
     }
@@ -377,9 +400,8 @@ def get_step_handler(step_name: str) -> StepHandler:
         return _handlers[step_name]
     # 内置 handler
     builtin = {
-        "style_prompt": _style_prompt_handler,
-        "script_audio": _script_audio_handler,
-        "storyboard_prompts": _storyboard_prompts_handler,
+        "script": _script_handler,
+        "storyboard_with_audio": _storyboard_with_audio_handler,
         "ffmpeg_merge": _ffmpeg_merge_handler,
     }
     if step_name in builtin:
@@ -528,13 +550,14 @@ def _summarize_output(output: dict) -> str:
         total = output.get("shot_count", 0)
         return f"🎬 {ok}/{total} 个视频"
     if "shots" in output:
-        return f"📋 {output.get('shot_count', 0)} 个分镜"
+        shots = output.get('shot_count', 0)
+        audio = ' 🔊' if output.get('audio_path') else ''
+        return f"📋 {shots} 个分镜{audio}"
     if "merged_path" in output:
-        return f"🎬 合成完成"
-    if "style_anchor" in output and output["style_anchor"]:
-        return f"🎨 {output['style_anchor'][:40]}..."
+        return "🎬 合成完成"
     if "script_text" in output:
-        return f"📝 {len(output['script_text'])} 字"
+        text_len = len(output.get('script_text', ''))
+        return f"📝 {text_len} 字"
     return "✓ 完成"
 
 

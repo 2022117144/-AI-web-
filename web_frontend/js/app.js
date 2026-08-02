@@ -257,6 +257,7 @@ async function loadStyles() {
 function onStyleChange() {
   const id = document.getElementById("styleSelector").value;
   const style = state.styles.find((s) => s.id === id);
+  selectedVisualStyle = style || null;
   document.getElementById("styleAnchorText").textContent = style ? style.video_anchor : "（未选择）";
   document.getElementById("charAnchorText").textContent = style ? style.character_anchor : "（未选择）";
 }
@@ -567,7 +568,7 @@ async function analyzeScript() {
       changeGridSize();
       if (state.currentProject) saveProjectContent();
       localStorage.removeItem("zctools_had_analysis_" + (state.currentProject ? state.currentProject.project_id : ""));
-      markPipelineStep(3, "completed");
+      markPipelineStep(2, "completed");
     }
 
 function renderShots(shots) {
@@ -1708,10 +1709,10 @@ function resetPipelineDisplay() {
   // 重置右侧面板流水线状态
   const rightStatus = document.getElementById("rightPipelineStatus");
   if (rightStatus) {
-    const labels = ["文案", "STR", "分镜", "图片", "视频", "合成", "发送"];
-    rightStatus.innerHTML = labels.map((l, i) =>
-      `<div>步骤 ${i + 1}/7 · ${l} ⏳</div>`
-    ).join("") + '<div style="color:var(--text-muted);margin-top:8px;font-size:10px">点击流水线 Tab 查看详情</div>';
+    const labels = ["文案", "分镜+字幕+音频", "图片", "视频", "合成", "发送"];
+        rightStatus.innerHTML = labels.map((l, i) =>
+          `<div>步骤 ${i + 1}/6 · ${l} ⏳</div>`
+        ).join("") + '<div style="color:var(--text-muted);margin-top:8px;font-size:10px">点击流水线 Tab 查看详情</div>';
   }
   // 清除轮询
   if (pipelinePollTimer) {
@@ -1737,11 +1738,10 @@ async function runPipeline() {
   stopBtn.textContent = "⏹ 运行中...";
   try {
     const config = {
-      style_prompt: { style_preset_id: document.getElementById("styleSelector")?.value || "", style_anchor: document.getElementById("styleAnchorText")?.textContent || "", character_anchor: document.getElementById("charAnchorText")?.textContent || "" },
-      script_audio: { script_text: document.getElementById("storyInput")?.value || "", voice_name: "zh-CN-XiaoxiaoNeural" },
-      storyboard_prompts: { shot_count: document.querySelectorAll(".shot-card").length || 3 },
-      photogpt_images: {}, insmind_video: {}, ffmpeg_merge: {}, bgm_send: {},
-    };
+          script: { script_text: document.getElementById("storyInput")?.value || "" },
+          storyboard_with_audio: { script_text: document.getElementById("storyInput")?.value || "", shot_count: document.querySelectorAll(".shot-card").length || 3, voice_name: "zh-CN-XiaoxiaoNeural" },
+          photogpt_images: {}, insmind_video: {}, ffmpeg_merge: {}, bgm_send: {},
+        };
     const projectId = state.currentProject ? state.currentProject.project_id : "";
     const result = await api("/pipeline/run", { body: { project_id: projectId, config } });
     state.lastRunId = result.run_id;

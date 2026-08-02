@@ -44,14 +44,13 @@
 └── docs/                   # 文档
 ```
 
-## 流水线步骤（7步）
-1. **style_prompt** — 风格提示词（可选）
-2. **script** — 文案生成（LLM）
-3. **audio_srt** → 实际用 `storyboard_prompts` + `script_audio` — 分镜提示词 + 旁白TTS
-4. **photogpt_images** — PhotoGPT 生成分镜图片
-5. **insmind_video** — insMind 生成视频片段
-6. **ffmpeg_merge** — ffmpeg 拼接（框架）
-7. **bgm_send** — 加BGM+发送（桩）
+## 流水线步骤（6步）
+1. **script** — 文案（用户输入，确认）
+2. **storyboard_with_audio** — 分镜提示词 + STR字幕 + 音频（LLM 生成分镜 + edge-tts 旁白 + SRT 字幕）
+3. **photogpt_images** — PhotoGPT 生成分镜图片
+4. **insmind_video** — insMind 生成视频片段
+5. **ffmpeg_merge** — ffmpeg 拼接（框架）
+6. **bgm_send** — 加BGM+发送（桩）
 
 ## 关键决策
 - 双路由合并：run.py 合并 zc_backend/server.py 和 api/server.py 的路由

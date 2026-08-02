@@ -1298,7 +1298,7 @@ def list_pipeline_handlers():
         step_name=s["name"],
         label=s["label"],
         registered=s["name"] in _handlers,
-        stub=not (s["name"] in _handlers or s["name"] in {"style_prompt", "script_audio", "storyboard_prompts", "ffmpeg_merge"}),
+        stub=not (s["name"] in _handlers or s["name"] in {"script", "storyboard_with_audio", "ffmpeg_merge"}),
     ) for s in pl.PIPELINE_STEPS]
 
 @app.post("/api/pipeline/run")
