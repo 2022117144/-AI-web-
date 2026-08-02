@@ -1788,14 +1788,24 @@ async function runPipeline() {
         await analyzeScript();
         // analyzeScript 内部会调 markPipelineStep(2, "completed")
       } else if (i === 2) {
-                          // 步骤3: 图片 — 触发批量生成图片按钮并等待完成
-                                                    if (!state.currentShots || state.currentShots.length === 0) {
-                                                      try {
-                                                        var saved = JSON.parse(localStorage.getItem(_projectKey("zctools_shots_data")) || "[]");
-                                                        if (saved.length > 0) state.currentShots = saved;
-                                                      } catch(e) {}
-                                                    }
-                                                    var batchBtn = document.getElementById("batchGenBtn");
+                                // 步骤3: 图片 — 先从后端加载分镜数据，再触发批量生成图片按钮并等待完成
+                                                          if (!state.currentShots || state.currentShots.length === 0) {
+                                                            try {
+                                                              var saved = JSON.parse(localStorage.getItem(_projectKey("zctools_shots_data")) || "[]");
+                                                              if (saved.length > 0) state.currentShots = saved;
+                                                            } catch(e) {}
+                                                          }
+                                                          // 如果 localStorage 也没有，从后端加载
+                                                          if (!state.currentShots || state.currentShots.length === 0) {
+                                                            try {
+                                                              var contentResp = await api("/projects/" + projectId + "/content");
+                                                              if (contentResp && contentResp.shots && contentResp.shots.length > 0) {
+                                                                state.currentShots = contentResp.shots;
+                                                                localStorage.setItem(_projectKey("zctools_shots_data"), JSON.stringify(contentResp.shots));
+                                                              }
+                                                            } catch(e) {}
+                                                          }
+                                                          var batchBtn = document.getElementById("batchGenBtn");
                                                     if (batchBtn) {
                                                       var p = batchBtn.onclick.call(batchBtn);
                                                       if (p && p.then) await p;
