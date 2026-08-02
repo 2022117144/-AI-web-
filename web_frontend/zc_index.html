@@ -205,7 +205,8 @@ body{background:var(--bg)}
       <textarea id="voiceoverInput" class="editor" placeholder="输入旁白/配音文本..." spellcheck="false"></textarea>
     </div>
 
-    <!-- 流水线 Tab -->
+    <!-- 流水线 Tab — 唯一流水线页面 -->
+    <!-- 注意：这是整个项目唯一的流水线界面。万象AI主界面 index.html 的 #wx-pipeline 只是一个 iframe 容器，嵌的就是这个页面。不存在两套流水线。 -->
     <div class="tab-content" id="tab-pipeline">
       <div id="pipelineFlow"></div>
       <div id="pipelineControls">

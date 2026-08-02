@@ -2,13 +2,18 @@
 智创工具 — 流水线引擎
 =====================
 按手绘流程图定义的 AI 视频自动生成管线：
-  风格提示词(可选) → 文案+STR音频 → 分镜提示词
-    → photogpt(待接) → 分镜图片
+  文案 → 分镜提示词+STR字幕+音频 → photogpt(待接) → 分镜图片
     → insm后端(待接) → 视频
     → ffmpeg(待接) → 整合视频
     → +BGM(待接) → 发送(待接)
 
 每步 handler 可插拔注册，未注册时返回"待接"桩。
+
+架构说明：
+- 这是整个项目唯一的流水线定义。PIPELINE_STEPS 是唯一的数据源。
+- 前端 zc_index.html 的 #tab-pipeline 通过 GET /api/pipeline/steps 动态渲染。
+- 万象AI主界面 index.html 的 #wx-pipeline 只是一个 iframe 容器，嵌的是 zc_index.html?tab=pipeline。
+- 不存在两套流水线。所有改动都在这里。
 """
 
 import json, os, uuid, requests, time
