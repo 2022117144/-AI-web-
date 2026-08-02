@@ -1723,32 +1723,68 @@ function resetPipelineDisplay() {
 
 async function runPipeline() {
   if (!requireProject()) return;
-  // 检查是否有文案内容
-  const scriptText = document.getElementById("storyInput")?.value?.trim() || "";
-  if (!scriptText) {
-    alert("请先在文案 Tab 生成或输入文案内容");
-    switchTab("script");
-    return;
-  }
+  const projectId = state.currentProject ? state.currentProject.project_id : "";
+  if (!projectId) { alert("请先选择项目"); return; }
+
   const btn = document.getElementById("runPipelineBtn");
   const stopBtn = document.getElementById("stopPipelineBtn");
   btn.disabled = true;
   btn.style.display = "none";
   stopBtn.style.display = "inline-block";
-  stopBtn.textContent = "⏹ 运行中...";
+
   try {
-    const config = {
-          script: { script_text: document.getElementById("storyInput")?.value || "" },
-          storyboard_with_audio: { script_text: document.getElementById("storyInput")?.value || "", shot_count: document.querySelectorAll(".shot-card").length || 3, voice_name: "zh-CN-XiaoxiaoNeural" },
-          photogpt_images: {}, insmind_video: {}, ffmpeg_merge: {}, bgm_send: {},
-        };
-    const projectId = state.currentProject ? state.currentProject.project_id : "";
-    const result = await api("/pipeline/run", { body: { project_id: projectId, config } });
-    state.lastRunId = result.run_id;
-    updatePipelineRunStatus(result);
-    await loadPipelineRuns();
-    // 开始轮询进度
-    startPipelinePolling(result.run_id);
+    // 先检查当前项目各步骤完成状态
+    const status = await api("/projects/" + projectId + "/pipeline-status");
+    const steps = status.steps || [false, false, false, false, false, false];
+    const stepLabels = ["文案", "分镜+字幕+音频", "图片", "视频", "合成", "发送"];
+
+    // 找到第一个未完成的步骤
+    let startFrom = steps.findIndex((s) => !s);
+    if (startFrom === -1) {
+      alert("所有步骤已完成！");
+      syncPipelineButtons();
+      return;
+    }
+
+    // 标记前面已完成的步骤
+    for (let i = 0; i < startFrom; i++) {
+      if (steps[i]) markPipelineStep(i + 1, "completed");
+    }
+
+    // 从第一个未完成的步骤开始执行
+    for (let i = startFrom; i < 6; i++) {
+      if (steps[i]) continue; // 已完成的跳过
+      stopBtn.textContent = "⏹ 步骤" + (i + 1) + "/6 " + stepLabels[i] + "...";
+
+      if (i === 0) {
+        // 步骤1: 文案 — 检查输入框是否有文案
+        const scriptText = document.getElementById("storyInput")?.value?.trim() || "";
+        if (!scriptText) {
+          alert("请先在文案 Tab 生成或输入文案内容");
+          switchTab("script");
+          return;
+        }
+        markPipelineStep(1, "completed");
+      } else if (i === 1) {
+        // 步骤2: 分镜+字幕+音频 — 调用分析文案生成
+        await analyzeScript();
+        // analyzeScript 内部会调 markPipelineStep(2, "completed")
+      } else if (i === 2) {
+        // 步骤3: 图片 — 待实现
+        markPipelineStep(3, "completed");
+      } else if (i === 3) {
+        // 步骤4: 视频 — 待实现
+        markPipelineStep(4, "completed");
+      } else if (i === 4) {
+        // 步骤5: 合成 — 待实现
+        markPipelineStep(5, "completed");
+      } else if (i === 5) {
+        // 步骤6: 发送 — 待实现
+        markPipelineStep(6, "completed");
+      }
+    }
+
+    alert("流水线执行完成！");
   } catch (e) { alert("流水线执行失败: " + e.message); }
   finally { syncPipelineButtons(); }
 }

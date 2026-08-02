@@ -247,7 +247,7 @@ def _script_audio_handler(project_data: dict, step_config: dict) -> dict:
         }
 
 def _storyboard_with_audio_handler(project_data: dict, step_config: dict) -> dict:
-    """合并步骤：用 LLM 生成分镜提示词 + 同时生成旁白音频"""
+    """合并步骤：复用 POST /api/script/task 分析文案，再生成旁白音频"""
     script_text = step_config.get("script_text", "")
     if not script_text:
         script_text = project_data.get("original_full_script", "") or project_data.get("original_story_desc", "")
@@ -259,85 +259,42 @@ def _storyboard_with_audio_handler(project_data: dict, step_config: dict) -> dic
     voice_name = step_config.get("voice_name", "zh-CN-XiaoxiaoNeural")
 
     if not script_text:
-        return {"success": True, "output": {"shots": [], "shot_count": 0, "audio_path": "", "srt_path": "", "message": "无文案内容"}, "error": ""}
+        return {"success": True, "output": {"shots": [], "shot_count": 0, "srt": [], "audio_path": "", "message": "无文案内容"}, "error": ""}
 
-    # ========== 1. LLM 生成分镜提示词 ==========
-    system_prompt = "你是一个专业的视频分镜师。根据用户提供的文案，生成结构化的分镜表。"
-    user_prompt = (
-        f"文案内容：\n{script_text}\n\n"
-        f"请将以上文案拆分为 {shot_count} 个分镜镜头，每个镜头包含以下字段：\n"
-        f"1. scene：场景描述（中文，30-50字）\n"
-        f"2. prompt：画面提示词（英文，适合AI出图，50-100词）\n"
-        f"3. duration：镜头时长（秒）\n"
-        f"4. framing：景别（可选：特写/近景/中景/全景/远景，根据情境推断）\n"
-        f"5. motion：运镜方式（可选：固定/推轨/后拉/摇镜/闪回/平滑，根据情境推断）\n"
-        f"6. lighting：光照氛围（可选：暖调/冷白/高对比/柔和/暗调/自然光）\n"
-        f"7. voiceover：该镜头的旁白文本（从文案中截取）\n"
-        f"8. video_prompt：完整英文生成prompt（中文场景+英文画面+风格+光照+运镜，30-60词）\n"
-    )
-    if characters:
-        char_info = "; ".join([f"{c.get('name','')}: {c.get('style','')}" for c in characters])
-        user_prompt += f"\n角色设定：\n{char_info}\n请将角色特征融入每个镜头的画面描述中。\n"
+    # ========== 1. 复用 POST /api/script/task 分析文案 ==========
+    # 从 server 模块获取任务函数
+    from server import _run_llm_task, _task_store, _task_lock
+    import uuid
 
-    user_prompt += (
-        f"\n以 JSON 格式输出，格式为：\n"
-        f'[{{"scene":"场景描述","prompt":"画面提示词","duration":3,"framing":"中景","motion":"推轨","lighting":"暖调","voiceover":"旁白文本","video_prompt":"完整prompt"}},...]\n'
-        f"注意：framing/motion/lighting/voiceover/video_prompt 是可选的，如果无法推断可以留空。\n"
-        f"只输出 JSON 数组，不要输出其他内容。"
-    )
+    task_id = uuid.uuid4().hex[:12]
+    with _task_lock:
+        _task_store[task_id] = {"status": "running", "result": None}
 
-    result = llm_mod.call_llm(
-        messages=[{"role": "user", "content": user_prompt}],
-        system_prompt=system_prompt,
-        temperature=0.3,
-        max_tokens=4096,
-    )
+    params = {
+        "topic": script_text,
+        "project_id": step_config.get("project_id", ""),
+        "style_anchor": step_config.get("style_anchor", ""),
+    }
+    _run_llm_task(task_id, "analyze", params)
 
-    # 解析 LLM 返回
+    # 等待任务完成（同步等待，最多 60s）
+    import time
+    deadline = time.time() + 60
     shots = []
-    if result:
-        import re
-        json_match = re.search(r'\[[\s\S]*\]', result)
-        if json_match:
-            try:
-                parsed = json.loads(json_match.group())
-                for i, item in enumerate(parsed):
-                    shots.append({
-                        "index": i,
-                        "scene": item.get("scene", ""),
-                        "prompt": item.get("prompt", ""),
-                        "enhanced_prompt": item.get("prompt", ""),
-                        "duration": item.get("duration", 3),
-                        "framing": item.get("framing", ""),
-                        "motion": item.get("motion", ""),
-                        "lighting": item.get("lighting", ""),
-                        "voiceover": item.get("voiceover", ""),
-                        "video_prompt": item.get("video_prompt", ""),
-                        "dialogue": item.get("dialogue", []),
-                        "actions": item.get("actions", []),
-                        "start_sec": item.get("start_sec", 0),
-                        "end_sec": item.get("end_sec", item.get("duration", 3)),
-                    })
-            except:
-                pass
-
-    # 如果 LLM 失败，fallback 到简单拆分
-    if not shots:
-        import re
-        text = script_text
-        sentences = [s.strip() for s in re.split(r'[。！？.!?\n]', text) if s.strip()]
-        for i, s in enumerate(sentences[:shot_count]):
-            shots.append({
-                "index": i,
-                "scene": s, "prompt": s, "enhanced_prompt": "",
-                "duration": 3, "framing": "", "motion": "", "lighting": "",
-                "voiceover": s, "video_prompt": "",
-                "dialogue": [], "actions": [],
-                "start_sec": i * 3, "end_sec": (i + 1) * 3,
-            })
+    srt = []
+    llm_generated = False
+    while time.time() < deadline:
+        with _task_lock:
+            task = _task_store.get(task_id)
+        if task and task["status"] in ("completed", "error"):
+            if task.get("result"):
+                shots = task.get("result", {}).get("shots", [])
+                srt = task.get("result", {}).get("srt", [])
+                llm_generated = bool(shots)
+            break
+        time.sleep(0.5)
 
     # ========== 2. TTS 生成旁白音频 ==========
-    # 映射语音名
     voice_map = {
         "zh_female_vv_uranus_bigtts": "zh-CN-XiaoxiaoNeural",
         "zh_female_2024_songs_female": "zh-CN-XiaoyiNeural",
@@ -347,7 +304,6 @@ def _storyboard_with_audio_handler(project_data: dict, step_config: dict) -> dic
     }
     mapped_voice = voice_map.get(voice_name, voice_name)
 
-    # 用完整文案生成旁白音频（不拆分）
     tts_result = _call_edge_tts(script_text, mapped_voice)
     audio_path = ""
     duration_ms = 0
@@ -367,11 +323,11 @@ def _storyboard_with_audio_handler(project_data: dict, step_config: dict) -> dic
         "output": {
             "shots": shots,
             "shot_count": len(shots),
-            "llm_generated": bool(result),
+            "srt": srt,
+            "llm_generated": llm_generated,
             "script_text": script_text,
             "voice_name": mapped_voice,
             "audio_path": audio_path,
-            "srt_path": "",
             "duration_ms": duration_ms,
             "tts_skipped": tts_skipped,
         },

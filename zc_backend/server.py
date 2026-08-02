@@ -390,9 +390,73 @@ def get_project_content(project_id: str):
     return data
 
 
+@app.get("/api/projects/{project_id}/pipeline-status")
+def get_pipeline_status(project_id: str):
+    """检查项目各流水线步骤的完成状态，用于前端自动判断从哪步开始"""
+    proj_dir = PROJECT_CONTENT_DIR / project_id
+    if not proj_dir.exists():
+        return {"steps": [False] * 6}
+
+    steps = [False] * 6
+
+    # 步骤1: 文案 — 检查 文案/script.txt 是否有内容
+    script_file = proj_dir / "文案" / "script.txt"
+    if script_file.exists() and script_file.read_text(encoding="utf-8").strip():
+        steps[0] = True
+
+    # 步骤2: 分镜+字幕+音频 — 检查 视频提示词/shots.json 和 srt.json
+    shots_file = proj_dir / "视频提示词" / "shots.json"
+    srt_file = proj_dir / "视频提示词" / "srt.json"
+    if shots_file.exists() and srt_file.exists():
+        shots = load_json(shots_file, [])
+        srt = load_json(srt_file, [])
+        if shots and srt:
+            steps[1] = True
+
+    # 步骤3: 图片 — 检查图片数量是否满足分镜需求
+    # 规则：第一个分镜需要首帧+尾帧（2张），其余分镜各1张尾帧，合计 shots_count + 1 张
+    img_dir = proj_dir / "图片"
+    if img_dir.exists():
+        imgs = [f for f in img_dir.iterdir() if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")]
+        # 获取分镜数量
+        shots_file = proj_dir / "视频提示词" / "shots.json"
+        shot_count = 0
+        if shots_file.exists():
+            shots = load_json(shots_file, [])
+            shot_count = len(shots)
+        # 所需图片数 = 分镜数 + 1（首帧1张 + 每分镜1张尾帧，没有分镜时不算完成）
+        needed = shot_count + 1
+        if shot_count > 0 and len(imgs) >= needed:
+            steps[2] = True
+
+    # 步骤4: 视频 — 检查视频数量是否等于分镜数
+    video_dir = proj_dir / "视频"
+    if video_dir.exists():
+        videos = [f for f in video_dir.iterdir() if f.suffix.lower() in (".mp4", ".webm", ".mov")]
+        # 获取分镜数量
+        shots_file = proj_dir / "视频提示词" / "shots.json"
+        shot_count = 0
+        if shots_file.exists():
+            shots = load_json(shots_file, [])
+            shot_count = len(shots)
+        # 所需视频数 = 分镜数（没有分镜时不算完成）
+        if shot_count > 0 and len(videos) >= shot_count:
+            steps[3] = True
+
+    # 步骤5: 合成 — 检查是否有 merged_video.mp4
+    merged = proj_dir / "视频" / "merged_video.mp4"
+    if merged.exists():
+        steps[4] = True
+
+    # 步骤6: 发送 — 暂无可检查项，默认未完成
+    steps[5] = False
+
+    return {"steps": steps, "project_id": project_id}
+
+
 # ============================================================
 # API: 下载媒体文件到本地项目文件夹
-# ============================================================
+    # ============================================================
 
 @app.post("/api/projects/{project_id}/download-media")
 def download_project_media(project_id: str, req: dict = Body(...)):
@@ -1798,8 +1862,13 @@ def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix
             ext = e
             break
     local_file = proj_dir / f"{filename_prefix}{ext}"
-    local_file = proj_dir / f"{filename_prefix}{ext}"
     try:
+        # 如果旧文件存在，备份为 _prev（保留上一次）
+        if local_file.exists():
+            prev_file = local_file.with_name(local_file.stem + "_prev" + ext)
+            if prev_file.exists():
+                prev_file.unlink()
+            local_file.rename(prev_file)
         proxy_url = "http://127.0.0.1:7897"
         proxies = {"all://": proxy_url} if proxy_url else None
         with _httpx.Client(proxies=proxies, timeout=60, follow_redirects=True, trust_env=False) as client:
