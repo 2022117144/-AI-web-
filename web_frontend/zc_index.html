@@ -46,8 +46,14 @@ body{background:var(--bg)}
     style.textContent = '.shot-card.selected{background:#d4cfc5!important}.shot-card:hover{background:#ddd8ce!important}.tab.active{color:#007acc!important}.btn-primary{background:#007acc!important}';
     document.head.appendChild(style);
   }
-})();
-</script>
+  // 立即根据 URL 参数切换 tab（避免闪烁）
+  var urlTab = new URLSearchParams(location.search).get('tab');
+  if (urlTab && ['script','shots','voiceover','pipeline','aitools','settings'].includes(urlTab)) {
+    document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active', t.dataset.tab === urlTab)});
+    document.querySelectorAll('.tab-content').forEach(function(c){c.classList.toggle('active', c.id === 'tab-' + urlTab)});
+  }
+  })();
+  </script>
 </head>
 <body>
 
@@ -78,7 +84,7 @@ body{background:var(--bg)}
   <div id="leftPanel">
     <!-- Tab 栏 -->
     <div class="tab-bar">
-      <button class="tab active" data-tab="script" onclick="switchTab('script')">📜 文案</button>
+      <button class="tab" data-tab="script" onclick="switchTab('script')">📜 文案</button>
       <button class="tab" data-tab="shots" onclick="switchTab('shots')">🎬 分镜</button>
       <button class="tab" data-tab="voiceover" onclick="switchTab('voiceover')">🎙 旁白</button>
       <button class="tab" data-tab="pipeline" onclick="switchTab('pipeline')">🔧 流水线</button>
@@ -87,7 +93,7 @@ body{background:var(--bg)}
     </div>
 
     <!-- 文案 Tab -->
-    <div class="tab-content active" id="tab-script">
+    <div class="tab-content" id="tab-script">
       <div class="script-generate-bar">
         <input id="scriptTopic" class="inp-full script-topic-input" placeholder="输入文案主题，如：一个关于春天的小故事" maxlength="200">
         <button class="btn btn-primary btn-sm" onclick="generateScript()" id="genScriptBtn">✨ AI 生成</button>

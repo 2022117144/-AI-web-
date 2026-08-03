@@ -25,6 +25,17 @@ let state = {
 
 // ========== 初始化 ==========
 function _initApp() {
+  // 立即切换到正确的 Tab（避免先显示文案再闪烁）
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlTab = urlParams.get('tab');
+  if (urlTab && ["script","shots","voiceover","pipeline","aitools","settings"].includes(urlTab)) {
+    switchTab(urlTab);
+  } else {
+    const savedTab = localStorage.getItem("zctools_active_tab");
+    if (savedTab && ["script","shots","voiceover","pipeline","aitools","settings"].includes(savedTab)) {
+      switchTab(savedTab);
+    }
+  }
   loadStyles();
   loadProjects();
   loadPipelineSteps();
@@ -101,20 +112,9 @@ function _initApp() {
                           }
                         }, 500);
   // 恢复上次的 Tab（刷新后保持）— 优先 URL 参数
-      const urlParams = new URLSearchParams(window.location.search);
-      const urlTab = urlParams.get('tab');
-      if (urlTab && ["script","shots","voiceover","pipeline","aitools","settings"].includes(urlTab)) {
-              switchTab(urlTab);
-            } else {
-              const savedTab = localStorage.getItem("zctools_active_tab");
-              if (savedTab && ["script","shots","voiceover","pipeline","aitools","settings"].includes(savedTab)) {
-          switchTab(savedTab);
-        } else {
-          switchTab("script");
-        }
-      }
+      // 恢复上次的 Tab — 优先 URL 参数（已移到 _initApp 开头，此处不再重复）
     // 如果 URL 有 project_id，自动选中项目
-        const urlPid = urlParams.get('project_id');
+        const urlPid = new URLSearchParams(window.location.search).get('project_id');
         if (urlPid) {
           const sel = document.getElementById("projectSelector");
           // 直接尝试选中
