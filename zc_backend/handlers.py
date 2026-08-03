@@ -12,7 +12,47 @@ import json
 import logging
 import time
 import httpx
+import os
+from pathlib import Path
 from typing import Optional
+
+# 项目内容目录
+PROJECT_CONTENT_DIR = Path(__file__).parent / "data" / "project_content"
+
+# 下载工具函数（避免循环导入）
+def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix: str) -> str:
+    """下载文件到项目文件夹对应子目录，返回本地路径"""
+    import httpx as dl_httpx
+    proj_dir = PROJECT_CONTENT_DIR / project_id / subdir
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    ext = ".jpg"
+    for e in [".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm", ".mov"]:
+        if e in url.lower():
+            ext = e
+            break
+    local_file = proj_dir / f"{filename_prefix}{ext}"
+    try:
+        if local_file.exists():
+            prev_file = local_file.with_name(local_file.stem + "_prev" + ext)
+            if prev_file.exists():
+                prev_file.unlink()
+            local_file.rename(prev_file)
+        proxy_url = "http://127.0.0.1:7897"
+        with dl_httpx.Client(proxy=proxy_url, timeout=60, follow_redirects=True, trust_env=False) as client:
+            resp = client.get(url,
+                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"})
+        if resp.status_code == 200:
+            tmp_file = local_file.with_suffix(".tmp" + ext)
+            tmp_file.write_bytes(resp.content)
+            if tmp_file.exists():
+                if local_file.exists():
+                    local_file.unlink()
+                tmp_file.rename(local_file)
+            return str(local_file)
+        print(f"下载失败: HTTP {resp.status_code} for {url[:50]}")
+    except Exception as e:
+        print(f"下载异常: {e}")
+    return ""
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +158,24 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
         if poll_result.get("success"):
             urls = poll_result.get("urls", [])
             if urls:
-                shot_frames[shot_idx][frame_type] = urls[0]
-                logger.info(f"  ✅ 分镜 #{shot_idx} {frame_type}: {urls[0][:60]}...")
+                raw_url = urls[0]
+                # 下载到本地项目缓存
+                project_id = project_data.get("project_id", "")
+                if project_id and raw_url:
+                    local_path = _download_to_project(project_id, "图片", raw_url, f"shot_{shot_idx}_{frame_type}")
+                    if local_path:
+                        # 转为本地项目文件路径
+                        rel_path = os.path.relpath(local_path, str(PROJECT_CONTENT_DIR))
+                        rel_parts = rel_path.replace("\\", "/").split("/")
+                        shot_frames[shot_idx][frame_type] = f"/api/project-files/{rel_parts[0]}/{rel_parts[1]}/{rel_parts[2]}"
+                        logger.info(f"  ✅ 分镜 #{shot_idx} {frame_type}: 本地 {shot_frames[shot_idx][frame_type]}")
+                    else:
+                        # 下载失败，回退到 CDN URL
+                        shot_frames[shot_idx][frame_type] = raw_url
+                        logger.info(f"  ⚠️ 分镜 #{shot_idx} {frame_type}: 下载失败，用 CDN URL")
+                else:
+                    shot_frames[shot_idx][frame_type] = raw_url
+                logger.info(f"  ✅ 分镜 #{shot_idx} {frame_type}: {shot_frames[shot_idx][frame_type][:60]}...")
             else:
                 logger.warning(f"  ⚠️ 分镜 #{shot_idx} {frame_type} 返回空 URL")
         else:

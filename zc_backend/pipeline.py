@@ -566,5 +566,19 @@ def get_run(run_id: str) -> Optional[PipelineRun]:
     return _runs.get(run_id)
 
 
+def clear_project_runs(project_id: str):
+    """清除指定项目的所有流水线运行记录"""
+    global _runs
+    to_delete = [k for k, v in _runs.items() if v.project_id == project_id]
+    for k in to_delete:
+        del _runs[k]
+    # 直接写文件
+    try:
+        data = {k: v.to_dict() for k, v in _runs.items()}
+        RUNS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    except:
+        pass
+
+
 # 启动时加载历史
 load_runs()

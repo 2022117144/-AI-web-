@@ -24,11 +24,11 @@ let state = {
 };
 
 // ========== 初始化 ==========
-document.addEventListener("DOMContentLoaded", async () => {
-  await loadStyles();
-  await loadProjects();
-  await loadPipelineSteps();
-  await loadPrompts();
+function _initApp() {
+  loadStyles();
+  loadProjects();
+  loadPipelineSteps();
+  loadPrompts();
   checkStatus();
   // 恢复上次的文案
     const saved = localStorage.getItem(_projectKey("zctools_script"));
@@ -138,7 +138,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 修复浏览器自动填充问题
   const mi = document.getElementById("modifyInstruction");
   if (mi) mi.value = "";
-});
+}
 
 // ========== API 工具 ==========
 async function api(path, opts = {}) {
@@ -1702,6 +1702,14 @@ function renderPipelineFlow() {
         `}).join("")}
       </div>
     `;
+  // 删除标题，替换为按钮
+  var titleEl = container.querySelector(".pipeline-title");
+  if (titleEl) {
+    var btnDiv = document.createElement("div");
+    btnDiv.className = "pipeline-header";
+    btnDiv.innerHTML = '<div class="pipeline-header-actions"><button class="btn-ancient" onclick="runPipeline()" id="runPipelineBtn">⚔ 执行流水线</button><button class="btn btn-danger" onclick="stopPipeline()" id="stopPipelineBtn" style="display:none">⏹ 停止</button></div>';
+    titleEl.parentNode.replaceChild(btnDiv, titleEl);
+  }
 }
 
 function resetPipelineDisplay() {
@@ -2818,3 +2826,9 @@ async function loadProps() {
 document.addEventListener("click", (e) => {
   if (e.target.classList.contains("modal-overlay")) e.target.classList.remove("show");
 });
+// 立即初始化
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", _initApp);
+} else {
+  _initApp();
+}

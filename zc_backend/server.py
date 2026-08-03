@@ -1493,7 +1493,14 @@ def cancel_pipeline_run(run_id: str):
     return {"status": "cancelling"}
 
 
-# ============================================================
+@app.post("/api/pipeline/runs/{project_id}/clear")
+def clear_pipeline_runs(project_id: str):
+    """清除指定项目的所有流水线运行记录"""
+    pl.clear_project_runs(project_id)
+    return {"status": "cleared"}
+
+
+    # ============================================================
 # API: 单帧/视频生成（前端调用）
 # ============================================================
 
