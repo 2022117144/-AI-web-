@@ -1676,40 +1676,29 @@ async function loadPipelineSteps() {
 }
 
 function renderPipelineFlow() {
-  const container = document.getElementById("pipelineFlow");
-  if (!container || state.pipelineSteps.length === 0) {
-    if (container) container.innerHTML = '<div class="pipeline-placeholder">加载步骤定义中...</div>';
-    return;
-  }
-  container.innerHTML = `
-      <div class="pipeline-title">📋 完整流水线</div>
-      <div class="pipeline-steps">
-        ${state.pipelineSteps.map((s, i) => {
-          var stepStatus = "pending";
-          if (state.pipelineRun && state.pipelineRun.steps && state.pipelineRun.steps[i]) {
-            stepStatus = state.pipelineRun.steps[i].status;
-          }
-          var statusClass = stepStatus === "completed" ? "pipe-completed" : stepStatus === "running" ? "pipe-running" : stepStatus === "error" ? "pipe-error" : stepStatus === "skipped" ? "pipe-skipped" : "";
-          return `
-          <div class="pipe-step ${statusClass}" data-step="${s.name}">
-            <div class="pipe-step-num">${i + 1}</div>
-            <div class="pipe-step-body">
-              <div class="pipe-step-name">${s.label}</div>
-                          <div class="pipe-step-desc">${s.description}</div>
-                        </div>
-          </div>
-          ${i < state.pipelineSteps.length - 1 ? '<div class="pipe-arrow">↓</div>' : ''}
-        `}).join("")}
-      </div>
-    `;
-  // 删除标题，替换为按钮
-  var titleEl = container.querySelector(".pipeline-title");
-  if (titleEl) {
-    var btnDiv = document.createElement("div");
-    btnDiv.className = "pipeline-header";
-    btnDiv.innerHTML = '<div class="pipeline-header-actions"><button class="btn-ancient" onclick="runPipeline()" id="runPipelineBtn">⚔ 执行流水线</button><button class="btn btn-danger" onclick="stopPipeline()" id="stopPipelineBtn" style="display:none">⏹ 停止</button></div>';
-    titleEl.parentNode.replaceChild(btnDiv, titleEl);
-  }
+  // 只更新步骤状态，不重建 HTML（HTML 已写在 zc_index.html 里）
+  if (!state.pipelineRun || !state.pipelineRun.steps) return;
+  state.pipelineRun.steps.forEach(function(step, i) {
+    var stepEl = document.querySelector('#pipelineFlow .pipe-step[data-step="' + state.pipelineSteps[i]?.name + '"]');
+    if (!stepEl) return;
+    stepEl.className = 'pipe-step';
+    if (step.status === "completed") stepEl.classList.add("pipe-completed");
+    else if (step.status === "running") stepEl.classList.add("pipe-running");
+    else if (step.status === "error") stepEl.classList.add("pipe-error");
+    else if (step.status === "skipped") stepEl.classList.add("pipe-skipped");
+    // 更新错误信息
+    var errorEl = stepEl.querySelector(".pipe-step-error");
+    if (step.error) {
+      if (!errorEl) {
+        errorEl = document.createElement("div");
+        errorEl.className = "pipe-step-error";
+        stepEl.appendChild(errorEl);
+      }
+      errorEl.textContent = step.error;
+    } else if (errorEl) {
+      errorEl.remove();
+    }
+  });
 }
 
 function resetPipelineDisplay() {

@@ -214,7 +214,27 @@ body{background:var(--bg)}
     <!-- 流水线 Tab — 唯一流水线页面 -->
     <!-- 注意：这是整个项目唯一的流水线界面。万象AI主界面 index.html 的 #wx-pipeline 只是一个 iframe 容器，嵌的就是这个页面。不存在两套流水线。 -->
     <div class="tab-content" id="tab-pipeline">
-      <div id="pipelineFlow"></div>
+          <div id="pipelineFlow">
+            <div class="pipeline-header">
+              <div class="pipeline-header-actions">
+                <button class="btn-ancient" onclick="runPipeline()" id="runPipelineBtn">▶ 执行流水线</button>
+                <button class="btn btn-danger" onclick="stopPipeline()" id="stopPipelineBtn" style="display:none">⏹ 停止</button>
+              </div>
+            </div>
+            <div class="pipeline-steps">
+              <div class="pipe-step" data-step="script"><div class="pipe-step-num">1</div><div class="pipe-step-body"><div class="pipe-step-name">文案</div><div class="pipe-step-desc">用户输入文案脚本</div></div></div>
+              <div class="pipe-arrow">↓</div>
+              <div class="pipe-step" data-step="storyboard_with_audio"><div class="pipe-step-num">2</div><div class="pipe-step-body"><div class="pipe-step-name">分镜提示词 + STR字幕 + 音频</div><div class="pipe-step-desc">从文案生成分镜提示词 + STR字幕 + 旁白配音音频</div></div></div>
+              <div class="pipe-arrow">↓</div>
+              <div class="pipe-step" data-step="photogpt_images"><div class="pipe-step-num">3</div><div class="pipe-step-body"><div class="pipe-step-name">分镜图片 (photogpt)</div><div class="pipe-step-desc">调用 PhotoGPT 为每个分镜生成图片</div></div></div>
+              <div class="pipe-arrow">↓</div>
+              <div class="pipe-step" data-step="insmind_video"><div class="pipe-step-num">4</div><div class="pipe-step-body"><div class="pipe-step-name">视频生成 (insm后端)</div><div class="pipe-step-desc">将分镜图片送入 insMind 后端生成视频片段</div></div></div>
+              <div class="pipe-arrow">↓</div>
+              <div class="pipe-step" data-step="ffmpeg_merge"><div class="pipe-step-num">5</div><div class="pipe-step-body"><div class="pipe-step-name">整合视频 (ffmpeg)</div><div class="pipe-step-desc">拼接所有视频片段为完整视频 + 可选配乐</div></div></div>
+              <div class="pipe-arrow">↓</div>
+              <div class="pipe-step" data-step="bgm_send"><div class="pipe-step-num">6</div><div class="pipe-step-body"><div class="pipe-step-name">加BGM → 发送</div><div class="pipe-step-desc">添加背景音乐并导出/发送成品</div></div></div>
+            </div>
+          </div>
             <div id="pipelineControls" style="display:none">
               <button class="btn btn-primary btn-lg" onclick="runPipeline()" id="runPipelineBtn">▶ 执行流水线</button>
               <button class="btn btn-danger btn-lg" onclick="stopPipeline()" id="stopPipelineBtn" style="display:none">⏹ 停止</button>
