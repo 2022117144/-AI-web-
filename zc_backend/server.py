@@ -1698,7 +1698,7 @@ async def _poll_photogpt_result_async(job_id: int, max_poll: int = 4) -> str:
         try:
             async with _httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get(
-                    f"http://localhost:8005/api/photogpt/generate/jobs?page=1&page_size=200",
+                    f"http://localhost:8005/api/photogpt/generate/jobs?page=1&page_size=2000",
                 )
             if resp.status_code != 200:
                 continue
@@ -1727,7 +1727,7 @@ def _poll_photogpt_result(job_id: int, max_poll: int = 4) -> str:
             time.sleep(60)
         try:
             resp = _httpx.get(
-                f"http://localhost:8005/api/photogpt/generate/jobs?page=1&page_size=200",
+                f"http://localhost:8005/api/photogpt/generate/jobs?page=1&page_size=2000",
                 timeout=10, trust_env=False,
             )
             if resp.status_code != 200:
@@ -1888,7 +1888,7 @@ async def insmind_accounts_count():
 
 
 def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix: str) -> str:
-    """下载文件到项目文件夹对应子目录，返回本地路径"""
+    """下载文件到项目文件夹对应子目录，返回本地路径，失败时抛异常"""
     import httpx as dl_httpx
     proj_dir = PROJECT_CONTENT_DIR / project_id / subdir
     proj_dir.mkdir(parents=True, exist_ok=True)
@@ -1898,30 +1898,26 @@ def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix
             ext = e
             break
     local_file = proj_dir / f"{filename_prefix}{ext}"
-    try:
-        # 如果旧文件存在，备份为 _prev（保留上一次）
+    # 如果旧文件存在，备份为 _prev（保留上一次）
+    if local_file.exists():
+        prev_file = local_file.with_name(local_file.stem + "_prev" + ext)
+        if prev_file.exists():
+            prev_file.unlink()
+        local_file.rename(prev_file)
+    proxy_url = "http://127.0.0.1:7897"
+    with _httpx.Client(proxy=proxy_url, timeout=60, follow_redirects=True, trust_env=False) as client:
+        resp = client.get(url,
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"})
+    if resp.status_code != 200:
+        raise RuntimeError(f"下载失败: HTTP {resp.status_code} for {url[:80]}")
+    # 先写临时文件，成功后再覆盖，避免失败时丢旧图
+    tmp_file = local_file.with_suffix(".tmp" + ext)
+    tmp_file.write_bytes(resp.content)
+    if tmp_file.exists():
         if local_file.exists():
-            prev_file = local_file.with_name(local_file.stem + "_prev" + ext)
-            if prev_file.exists():
-                prev_file.unlink()
-            local_file.rename(prev_file)
-        proxy_url = "http://127.0.0.1:7897"
-        with _httpx.Client(proxy=proxy_url, timeout=60, follow_redirects=True, trust_env=False) as client:
-            resp = client.get(url,
-                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"})
-        if resp.status_code == 200:
-            # 先写临时文件，成功后再覆盖，避免失败时丢旧图
-            tmp_file = local_file.with_suffix(".tmp" + ext)
-            tmp_file.write_bytes(resp.content)
-            if tmp_file.exists():
-                if local_file.exists():
-                    local_file.unlink()
-                tmp_file.rename(local_file)
-            return str(local_file)
-        print(f"下载失败: HTTP {resp.status_code} for {url[:50]}")
-    except Exception as e:
-        print(f"下载异常: {e}")
-    return ""
+            local_file.unlink()
+        tmp_file.rename(local_file)
+    return str(local_file)
 
 
 def _save_data_url_to_project(project_id: str, subdir: str, data_url: str, filename_prefix: str) -> str:
@@ -1990,8 +1986,8 @@ def _poll_video_result(job_id: int, max_poll: int = 10) -> str:
     """轮询 content generation 直到拿到 video URL（10次 × 60秒 = 10分钟）"""
     import time
     for i in range(max_poll):
-        time.sleep(60)
         try:
+            time.sleep(60)
             resp = _httpx.get(f"http://localhost:8005/api/content/jobs/{job_id}", timeout=10, trust_env=False)
             if resp.status_code == 404:
                 return ""

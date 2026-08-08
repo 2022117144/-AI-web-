@@ -21,7 +21,7 @@ PROJECT_CONTENT_DIR = Path(__file__).parent / "data" / "project_content"
 
 # 下载工具函数（避免循环导入）
 def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix: str) -> str:
-    """下载文件到项目文件夹对应子目录，返回本地路径"""
+    """下载文件到项目文件夹对应子目录，返回本地路径，失败时抛异常"""
     import httpx as dl_httpx
     proj_dir = PROJECT_CONTENT_DIR / project_id / subdir
     proj_dir.mkdir(parents=True, exist_ok=True)
@@ -31,28 +31,24 @@ def _download_to_project(project_id: str, subdir: str, url: str, filename_prefix
             ext = e
             break
     local_file = proj_dir / f"{filename_prefix}{ext}"
-    try:
+    if local_file.exists():
+        prev_file = local_file.with_name(local_file.stem + "_prev" + ext)
+        if prev_file.exists():
+            prev_file.unlink()
+        local_file.rename(prev_file)
+    proxy_url = "http://127.0.0.1:7897"
+    with dl_httpx.Client(proxy=proxy_url, timeout=60, follow_redirects=True, trust_env=False) as client:
+        resp = client.get(url,
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"})
+    if resp.status_code != 200:
+        raise RuntimeError(f"下载失败: HTTP {resp.status_code} for {url[:80]}")
+    tmp_file = local_file.with_suffix(".tmp" + ext)
+    tmp_file.write_bytes(resp.content)
+    if tmp_file.exists():
         if local_file.exists():
-            prev_file = local_file.with_name(local_file.stem + "_prev" + ext)
-            if prev_file.exists():
-                prev_file.unlink()
-            local_file.rename(prev_file)
-        proxy_url = "http://127.0.0.1:7897"
-        with dl_httpx.Client(proxy=proxy_url, timeout=60, follow_redirects=True, trust_env=False) as client:
-            resp = client.get(url,
-                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"})
-        if resp.status_code == 200:
-            tmp_file = local_file.with_suffix(".tmp" + ext)
-            tmp_file.write_bytes(resp.content)
-            if tmp_file.exists():
-                if local_file.exists():
-                    local_file.unlink()
-                tmp_file.rename(local_file)
-            return str(local_file)
-        print(f"下载失败: HTTP {resp.status_code} for {url[:50]}")
-    except Exception as e:
-        print(f"下载异常: {e}")
-    return ""
+            local_file.unlink()
+        tmp_file.rename(local_file)
+    return str(local_file)
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +83,7 @@ def _photogpt_poll_job(job_id: int) -> Optional[dict]:
                 break
         except Exception as e:
             logger.warning(f"photogpt poll error (attempt {i+1}): {e}")
+            return {"success": False, "error": f"轮询异常: {e}"}
     return {"success": False, "error": "轮询超时"}
 
 
@@ -158,24 +155,29 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
         if poll_result.get("success"):
             urls = poll_result.get("urls", [])
             if urls:
-                raw_url = urls[0]
-                # 下载到本地项目缓存
-                project_id = project_data.get("project_id", "")
-                if project_id and raw_url:
-                    local_path = _download_to_project(project_id, "图片", raw_url, f"shot_{shot_idx}_{frame_type}")
-                    if local_path:
-                        # 转为本地项目文件路径
-                        rel_path = os.path.relpath(local_path, str(PROJECT_CONTENT_DIR))
-                        rel_parts = rel_path.replace("\\", "/").split("/")
-                        shot_frames[shot_idx][frame_type] = f"/api/project-files/{rel_parts[0]}/{rel_parts[1]}/{rel_parts[2]}"
-                        logger.info(f"  ✅ 分镜 #{shot_idx} {frame_type}: 本地 {shot_frames[shot_idx][frame_type]}")
-                    else:
-                        # 下载失败，回退到 CDN URL
-                        shot_frames[shot_idx][frame_type] = raw_url
-                        logger.info(f"  ⚠️ 分镜 #{shot_idx} {frame_type}: 下载失败，用 CDN URL")
-                else:
-                    shot_frames[shot_idx][frame_type] = raw_url
-                logger.info(f"  ✅ 分镜 #{shot_idx} {frame_type}: {shot_frames[shot_idx][frame_type][:60]}...")
+                            raw_url = urls[0]
+                            # 下载到本地项目缓存
+                            project_id = project_data.get("project_id", "")
+                            if project_id and raw_url:
+                                try:
+                                    local_path = _download_to_project(project_id, "图片", raw_url, f"shot_{shot_idx}_{frame_type}")
+                                    # 转为本地项目文件路径
+                                    rel_path = os.path.relpath(local_path, str(PROJECT_CONTENT_DIR))
+                                    rel_parts = rel_path.replace("\\\\", "/").split("/")
+                                    shot_frames[shot_idx][frame_type] = f"/api/project-files/{rel_parts[0]}/{rel_parts[1]}/{rel_parts[2]}"
+                                    logger.info(f"  ✅ 分镜 #{shot_idx} {frame_type}: 本地 {shot_frames[shot_idx][frame_type]}")
+                                except Exception as e:
+                                    # 下载失败：记录错误并停止流水线（不静默回退 CDN）
+                                    err_msg = f"分镜 #{shot_idx} {frame_type} 图片下载失败: {e}"
+                                    logger.error(f"  ❌ {err_msg}")
+                                    return {
+                                        "success": False,
+                                        "output": {},
+                                        "error": err_msg,
+                                    }
+                            else:
+                                shot_frames[shot_idx][frame_type] = raw_url
+                            logger.info(f"  ✅ 分镜 #{shot_idx} {frame_type}: {shot_frames[shot_idx][frame_type][:60]}...")
             else:
                 logger.warning(f"  ⚠️ 分镜 #{shot_idx} {frame_type} 返回空 URL")
         else:
@@ -191,6 +193,7 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
     # 构建输出
     results = []
     success_count = 0
+    errors = []  # 收集各分镜的生成/下载错误
     for idx, frames in sorted(shot_frames.items()):
         urls = []
         if frames["first_frame"]:
@@ -199,6 +202,8 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
             urls.append(frames["last_frame"])
         if urls:
             success_count += 1
+        else:
+            errors.append(f"分镜 #{idx}: 无图片")
         results.append({
             "shot_index": idx,
             "urls": urls,
@@ -224,7 +229,7 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
 # insmind: 视频生成
 # ============================================================
 
-def _content_poll_job(job_id: int, max_poll: int = 120) -> Optional[dict]:
+def _content_poll_job(job_id: int, max_poll: int = 10) -> Optional[dict]:
     """轮询 content generation 任务"""
     for i in range(max_poll):
         time.sleep(POLL_INTERVAL)
@@ -241,6 +246,7 @@ def _content_poll_job(job_id: int, max_poll: int = 120) -> Optional[dict]:
                 return {"success": False, "error": err}
         except Exception as e:
             logger.warning(f"content poll error (attempt {i+1}): {e}")
+            return {"success": False, "error": f"轮询异常: {e}"}
     return {"success": False, "error": "轮询超时"}
 
 
@@ -330,7 +336,7 @@ def insmind_video_handler(project_data: dict, step_config: dict) -> dict:
                                 job_id = retry_data.get("id")
                                 if job_id:
                                     logger.info(f"insmind job #{job_id} 已提交（重试）")
-                                    poll_result = _content_poll_job(job_id, max_poll=120)
+                                    poll_result = _content_poll_job(job_id, max_poll=10)
                                     if poll_result.get("success"):
                                         urls = poll_result.get("urls", [])
                                         video_url = urls[0] if urls else ""
@@ -361,12 +367,12 @@ def insmind_video_handler(project_data: dict, step_config: dict) -> dict:
                 continue
 
             logger.info(f"insmind job #{job_id} 已提交，开始轮询...")
-            poll_result = _content_poll_job(job_id, max_poll=120)  # 视频生成约6分钟
+            poll_result = _content_poll_job(job_id, max_poll=10)  # 视频生成约10分钟
 
             if poll_result.get("success"):
                 urls = poll_result.get("urls", [])
                 video_url = urls[0] if urls else ""
-                logger.info(f"分镜 #{idx} 视频生成成功: {video_url}")
+                logger.info(f"分镜 #{idx} 视频生成成功: {video_url[:80]}")
                 results.append({"shot_index": idx, "video_url": video_url, "error": ""})
             else:
                 err = poll_result.get("error", "生成失败")

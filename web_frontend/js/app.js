@@ -46,13 +46,13 @@ function _initApp() {
     if (saved) document.getElementById("storyInput").value = saved;
     // 自动保存文案到 localStorage（也自动存到项目）+ 实时字数统计
           document.getElementById("storyInput").addEventListener("input", function() {
-            localStorage.setItem(_projectKey("zctools_script"), this.value);
+            try { localStorage.setItem(_projectKey("zctools_script"), this.value); } catch(e) {}
             updateCharCount();
             // 自动保存到后端（防抖）
             clearTimeout(this._saveTimer);
             this._saveTimer = setTimeout(() => {
               if (state.currentProject && this.value.trim()) {
-                saveProjectContent();
+                saveProjectContent().catch(function(e){ console.warn("自动保存失败:", e); });
               }
             }, 1500);
           });
@@ -225,7 +225,6 @@ async function _resumePendingTask(pid) {
     } catch {
       localStorage.removeItem(key + pid);
     }
-    break;
   }
 }
 
@@ -318,7 +317,11 @@ async function saveProjectContent() {
 async function loadProjectContent(projectId, clearIfEmpty = false) {
   // 恢复该项目的生成中状态和选中分镜
   const genKey = "zctools_shot_generating_" + projectId;
-  state.shotGenerating = JSON.parse(localStorage.getItem(genKey) || "{}");
+  try {
+    state.shotGenerating = JSON.parse(localStorage.getItem(genKey) || "{}");
+  } catch(e) {
+    state.shotGenerating = {};
+  }
   let hasData = false;
   try {
     const content = await api("/projects/" + projectId + "/content");
@@ -1444,6 +1447,7 @@ async function batchGenFrames() {
 
                                                                         // 串行提交视频生成请求，间隔3秒
                         window._videoCompletedCount = 0;
+                        window._videoBatchActive = true;
                         const totalTasks = tasks.length;
                         btn.textContent = `⏳ 提交中 0/${totalTasks}...`;
 
@@ -1474,6 +1478,7 @@ async function batchGenFrames() {
                         if (state.selectedShotIdx !== null) selectShot(state.selectedShotIdx);
                         if (state.currentProject) await saveProjectContent();
 
+                        window._videoBatchActive = false;
                         btn.disabled = false;
                         btn.textContent = "🎬 一键生成视频";
                         alert(`视频生成完成！成功 ${window._videoCompletedCount || 0} 个`);
@@ -1520,7 +1525,7 @@ async function batchGenFrames() {
         if (res.success && res.video_url) {
           saveShotData(idx, { video: res.video_url });
           // 批量模式下计数
-          if (window._videoCompletedCount !== undefined) {
+          if (window._videoBatchActive === true) {
             window._videoCompletedCount++;
           }
           selectShot(idx);
@@ -1528,10 +1533,18 @@ async function batchGenFrames() {
           // 保存到后端
           if (state.currentProject) saveProjectContent();
         } else {
+        // 批量模式下失败也计数，避免等待循环永远卡住
+        if (window._videoBatchActive === true) {
+          window._videoCompletedCount++;
+        }
         alert("视频生成失败: " + (typeof res.error === 'string' ? res.error : JSON.stringify(res.error || "未知错误")));
         if (isSingle) { btn.disabled = false; btn.textContent = "🎬 生成视频"; }
       }
     }).catch(e => {
+      // 批量模式下失败也计数
+      if (window._videoBatchActive === true) {
+        window._videoCompletedCount++;
+      }
       alert("视频生成失败: " + e.message);
       if (isSingle) { btn.disabled = false; btn.textContent = "🎬 生成视频"; }
   });
@@ -1641,8 +1654,8 @@ async function markPipelineStep(stepIndex, status, errorMsg) {
     state.pipelineRun = { steps: [], run_id: "run_" + Date.now().toString(36), project_id: pid };
     for (var i = 0; i < 6; i++) state.pipelineRun.steps.push({ status: "pending" });
   }
-  // 级联：完成第N步时，前面所有步骤也标记为完成
-    if (status === "completed" || status === "error") {
+  // 级联：完成第N步时，前面所有步骤也标记为完成（error 时不级联，避免错误标记前序步骤）
+    if (status === "completed") {
       for (var j = 0; j <= stepIndex - 1; j++) {
         if (state.pipelineRun.steps[j] && state.pipelineRun.steps[j].status === "pending") {
           state.pipelineRun.steps[j].status = "completed";
@@ -1763,9 +1776,15 @@ async function runPipeline() {
   try {
       // 标记为流水线执行模式，禁止弹窗
       window._pipelineRunning = true;
-      const status = await api("/projects/" + projectId + "/pipeline-status");
-            var steps = status.steps || [false, false, false, false, false, false];
-            const stepLabels = ["文案", "分镜+字幕+音频", "图片", "视频", "合成", "发送"];
+      var steps = [false, false, false, false, false, false];
+      try {
+        const status = await api("/projects/" + projectId + "/pipeline-status");
+        steps = status.steps || [false, false, false, false, false, false];
+      } catch(e) {
+        // 获取状态失败，从步骤0开始
+        console.warn("获取流水线状态失败，从头开始:", e.message);
+      }
+      const stepLabels = ["文案", "分镜+字幕+音频", "图片", "视频", "合成", "发送"];
 
       // 找到第一个未完成的步骤
       var startFrom = steps.findIndex((s) => !s);
