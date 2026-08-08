@@ -378,8 +378,8 @@ select:focus, input:focus { border-color: var(--accent); }
   transition: all 0.3s;
 }
 .pipe-step.pipe-completed { border-color: var(--green); border-width: 2px; box-shadow: 0 0 16px rgba(46,204,113,0.5); }
-.pipe-step.pipe-running { border-color: #c0c0c0; border-width: 2px; box-shadow: 0 0 20px rgba(192,192,192,0.4); animation: pipeWhiteGlow 0.8s ease-in-out infinite alternate; }
-@keyframes pipeWhiteGlow { from { box-shadow: 0 0 8px rgba(192,192,192,0.2); } to { box-shadow: 0 0 28px rgba(192,192,192,0.6); } }
+.pipe-step.pipe-running { border-color: #f39c12; border-width: 2px; box-shadow: 0 0 20px rgba(243,156,18,0.5); animation: pipeGoldGlow 0.8s ease-in-out infinite alternate; }
+@keyframes pipeGoldGlow { from { box-shadow: 0 0 8px rgba(243,156,18,0.25); } to { box-shadow: 0 0 28px rgba(243,156,18,0.7); } }
 .pipe-step.pipe-error { border-color: var(--red); border-width: 2px; box-shadow: 0 0 16px rgba(231,76,60,0.5); }
 .pipe-step.pipe-skipped { opacity: 0.5; }
 .pipe-step-num {

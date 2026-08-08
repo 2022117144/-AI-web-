@@ -568,7 +568,11 @@ async function analyzeScript() {
         } else {
           alert("分析失败: " + (result?.error || "未知错误"));
         }
-      } catch (e) { alert("分析失败: " + e.message); }
+      } catch (e) {
+        // 流水线模式下让异常冒泡，否则 runPipeline 不知道步骤2失败
+        if (window._pipelineRunning) throw e;
+        alert("分析失败: " + e.message);
+      }
       finally { btn.disabled = false; btn.textContent = "🔍 分析文案生成"; }
     }
 
@@ -1800,7 +1804,9 @@ async function runPipeline() {
     }
 
     // 从第一个未完成的步骤开始执行
+        var currentStep = startFrom; // 记录当前执行到的步骤，用于错误定位
         for (let i = startFrom; i < 6; i++) {
+          currentStep = i;
           if (steps[i]) continue; // 已完成的跳过
           stopBtn.textContent = "⏹ 步骤" + (i + 1) + "/6 " + stepLabels[i] + "...";
           markPipelineStep(i + 1, "running");
@@ -1871,15 +1877,19 @@ async function runPipeline() {
         // 步骤6: 发送 — 待实现
         markPipelineStep(6, "completed");
       }
+
+      // 每步完成后重新获取状态，避免 steps 快照不更新导致循环判断错误
+      try {
+        const latest = await api("/projects/" + projectId + "/pipeline-status");
+        steps = latest.steps || steps;
+      } catch(e) { /* 忽略状态刷新失败 */ }
     }
 
     alert("流水线执行完成！");
       } catch (e) {
               // 标记当前步骤为失败（显示红色边框 + 错误信息）
-              var errStep = startFrom;
-              for (var si = startFrom; si < 6; si++) {
-                if (!steps[si]) { errStep = si; break; }
-              }
+              // 用当前执行到的步骤 i，而不是过时的 steps 快照
+              var errStep = (typeof currentStep !== "undefined") ? currentStep : startFrom;
               markPipelineStep(errStep + 1, "error", e.message);
               alert("流水线执行失败: " + e.message);
             }
