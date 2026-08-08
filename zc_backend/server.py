@@ -1411,6 +1411,7 @@ def update_pipeline_step(run_id: str, req: dict = Body(...)):
         r = runs[run_id]
         step_idx = req.get("step_index", -1)
         status = req.get("status", "pending")
+        error = req.get("error", "")
         steps = r.get("steps", [])
         if status == "completed":
             for i in range(step_idx + 1):
@@ -1418,6 +1419,10 @@ def update_pipeline_step(run_id: str, req: dict = Body(...)):
                     steps[i]["status"] = "completed"
         if 0 <= step_idx < len(steps):
             steps[step_idx]["status"] = status
+            if error:
+                steps[step_idx]["error"] = error
+            elif "error" in steps[step_idx]:
+                del steps[step_idx]["error"]
         r["steps"] = steps
         r["status"] = req.get("run_status", r.get("status", "pending"))
         save_json(pl.RUNS_FILE, runs)
@@ -1434,13 +1439,15 @@ def update_pipeline_step(run_id: str, req: dict = Body(...)):
     run.run_id = run_id
     step_idx = req.get("step_index", -1)
     status = req.get("status", "pending")
+    error = req.get("error", "")
     if status == "completed":
         for i in range(step_idx + 1):
             if i < len(run.steps):
                 run.steps[i]["status"] = "completed"
     if 0 <= step_idx < len(run.steps):
         run.steps[step_idx]["status"] = status
-    # 同步到内存和文件
+        if error:
+            run.steps[step_idx]["error"] = error
     pl.save_run(run)
     return {"status": "ok", "run": run.to_dict()}
 

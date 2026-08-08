@@ -1442,35 +1442,41 @@ async function batchGenFrames() {
                                                                         btn.disabled = true;
                                                                         btn.textContent = "⏳ 生成中...";
 
-                                                                        // 同步提交所有视频生成请求
-                        const results = await Promise.allSettled(
-                          tasks.map(t => new Promise(resolve => {
-                            genShotVideo(t.idx);
-                            // 轮询等待视频生成完成（shotData.video 有值）
-                            const check = setInterval(() => {
-                              const sd = loadShotData(t.idx);
-                              if (sd && sd.video) {
-                                clearInterval(check);
-                                resolve({ status: "fulfilled" });
-                              }
-                            }, 500);
-                            setTimeout(() => { clearInterval(check); resolve({ status: "fulfilled" }); }, 600000); // 10分钟超时
-                          }))
-                        );
+                                                                        // 串行提交视频生成请求，间隔3秒
+                        window._videoCompletedCount = 0;
+                        const totalTasks = tasks.length;
+                        btn.textContent = `⏳ 提交中 0/${totalTasks}...`;
 
-                        let success = 0;
-                        let fail = 0;
-                        for (const r of results) {
-                          if (r.status === "fulfilled") success++;
-                          else fail++;
+                        for (let ti = 0; ti < tasks.length; ti++) {
+                          genShotVideo(tasks[ti].idx);
+                          btn.textContent = `⏳ 提交中 ${ti + 1}/${totalTasks}...`;
+                          // 等3秒再提交下一个（最后一个不需要等）
+                          if (ti < tasks.length - 1) {
+                            await new Promise(r => setTimeout(r, 3000));
+                          }
                         }
+
+                        btn.textContent = `⏳ 等待视频完成 0/${totalTasks}...`;
+
+                        // 等待所有视频完成
+                        await new Promise((resolve) => {
+                          const check = setInterval(() => {
+                            const done = window._videoCompletedCount || 0;
+                            btn.textContent = `⏳ 等待视频完成 ${done}/${totalTasks}...`;
+                            if (done >= totalTasks) {
+                              clearInterval(check);
+                              resolve();
+                            }
+                          }, 1000);
+                          setTimeout(() => { clearInterval(check); resolve(); }, 600000); // 10分钟超时
+                        });
 
                         if (state.selectedShotIdx !== null) selectShot(state.selectedShotIdx);
                         if (state.currentProject) await saveProjectContent();
 
                         btn.disabled = false;
                         btn.textContent = "🎬 一键生成视频";
-                        alert(`视频生成完成！成功 ${success} 个，失败 ${fail} 个`);
+                        alert(`视频生成完成！成功 ${window._videoCompletedCount || 0} 个`);
                       }
 
                       function genShotVideo(idx) {
@@ -1513,6 +1519,10 @@ async function batchGenFrames() {
   }).then(res => {
         if (res.success && res.video_url) {
           saveShotData(idx, { video: res.video_url });
+          // 批量模式下计数
+          if (window._videoCompletedCount !== undefined) {
+            window._videoCompletedCount++;
+          }
           selectShot(idx);
           if (isSingle) { btn.disabled = false; btn.textContent = "🎬 生成视频"; }
           // 保存到后端
@@ -1624,7 +1634,7 @@ function renderTasks() {
 }
 
 // 标记流水线步骤完成（级联+持久化）
-async function markPipelineStep(stepIndex, status) {
+async function markPipelineStep(stepIndex, status, errorMsg) {
   // 更新本地 state
   if (!state.pipelineRun) {
     var pid = typeof state.currentProject === "string" ? state.currentProject : (state.currentProject?.project_id || "");
@@ -1641,6 +1651,9 @@ async function markPipelineStep(stepIndex, status) {
     }
   if (state.pipelineRun.steps[stepIndex - 1]) {
     state.pipelineRun.steps[stepIndex - 1].status = status;
+    if (errorMsg !== undefined) {
+      state.pipelineRun.steps[stepIndex - 1].error = errorMsg;
+    }
   }
   // 持久化到后端
     var runId = state.pipelineRun.run_id || "run_" + Date.now().toString(36);
@@ -1649,7 +1662,7 @@ async function markPipelineStep(stepIndex, status) {
         await fetch("/api/pipeline/runs/" + runId + "/step", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({ step_index: stepIndex - 1, status: status, project_id: projId, run_id: runId })
+          body: JSON.stringify({ step_index: stepIndex - 1, status: status, project_id: projId, run_id: runId, error: errorMsg || "" })
         });
       } catch(e) { console.warn("保存流水线状态失败:", e); }
   // 重新渲染流水线
@@ -1843,12 +1856,12 @@ async function runPipeline() {
 
     alert("流水线执行完成！");
       } catch (e) {
-              // 标记当前步骤为失败（显示红色边框）
+              // 标记当前步骤为失败（显示红色边框 + 错误信息）
               var errStep = startFrom;
               for (var si = startFrom; si < 6; si++) {
                 if (!steps[si]) { errStep = si; break; }
               }
-              markPipelineStep(errStep + 1, "error");
+              markPipelineStep(errStep + 1, "error", e.message);
               alert("流水线执行失败: " + e.message);
             }
         finally { window._pipelineRunning = false; syncPipelineButtons(); }
