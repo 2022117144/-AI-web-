@@ -1789,16 +1789,13 @@ async def batch_generate_frames(req: BatchFrameRequest):
             except Exception as e:
                 return {"shot_idx": frame.get("shot_idx"), "mode": frame.get("mode"), "success": False, "image_url": "", "error": str(e)}
 
-        # 分批提交，每批 4 个，间隔 1 秒，避免并发过载导致 sqlite 锁冲突
+        # 逐个提交，等上一个返回 submitted 后再提交下一个
         results = []
-        BATCH_SIZE = 4
-        BATCH_INTERVAL = 1  # 秒
-        for i in range(0, len(frames), BATCH_SIZE):
-            batch = frames[i:i + BATCH_SIZE]
-            batch_results = await _asyncio.gather(*[_gen_one(f) for f in batch])
-            results.extend(batch_results)
-            if i + BATCH_SIZE < len(frames):
-                await _asyncio.sleep(BATCH_INTERVAL)
+        for f in frames:
+            result = await _gen_one(f)
+            results.append(result)
+            # 如果上一个提交失败，记录错误但继续下一个
+            logger.info("  batch frame shot_idx=%s mode=%s success=%s" % (f.get("shot_idx"), f.get("mode"), result.get("success")))
         _batch_tasks[task_id] = {"status": "completed", "results": results, "total": len(frames)}
 
     _batch_tasks[task_id] = {"status": "running", "results": [], "total": len(frames)}
