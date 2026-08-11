@@ -564,7 +564,7 @@ async function analyzeScript() {
     // 轮询任务结果
         const result = await _pollTask(taskId, taskKey);
         if (result && result.generated) {
-          _handleAnalyzeResult(result);
+                  await _handleAnalyzeResult(result);
         } else {
           alert("分析失败: " + (result?.error || "未知错误"));
         }
@@ -576,21 +576,28 @@ async function analyzeScript() {
       finally { btn.disabled = false; btn.textContent = "🔍 分析文案生成"; }
     }
 
-    function _handleAnalyzeResult(result) {
-      renderShots(result.shots || []);
-      renderSRT(result.srt || []);
-      localStorage.setItem(_projectKey("zctools_shots"), JSON.stringify(result.shots || []));
-      localStorage.setItem(_projectKey("zctools_srt"), JSON.stringify(result.srt || []));
-      localStorage.setItem(_projectKey("zctools_shots_data"), JSON.stringify(result.shots || []));
-      state.currentShots = result.shots || [];
-      state.currentSRT = result.srt || [];
-      const imgSection = document.getElementById("shotsImagesSection");
-      if (imgSection) imgSection.style.display = "block";
-      changeGridSize();
-      if (state.currentProject) saveProjectContent();
-      localStorage.removeItem("zctools_had_analysis_" + (state.currentProject ? state.currentProject.project_id : ""));
-      markPipelineStep(2, "completed");
-    }
+    async function _handleAnalyzeResult(result) {
+          renderShots(result.shots || []);
+          renderSRT(result.srt || []);
+          localStorage.setItem(_projectKey("zctools_shots"), JSON.stringify(result.shots || []));
+          localStorage.setItem(_projectKey("zctools_srt"), JSON.stringify(result.srt || []));
+          localStorage.setItem(_projectKey("zctools_shots_data"), JSON.stringify(result.shots || []));
+          state.currentShots = result.shots || [];
+          state.currentSRT = result.srt || [];
+          const imgSection = document.getElementById("shotsImagesSection");
+          if (imgSection) imgSection.style.display = "block";
+          changeGridSize();
+          if (state.currentProject) {
+            try {
+              await saveProjectContent();
+            } catch (e) {
+              // 保存失败时抛异常，阻止 markPipelineStep，流水线会知道步骤2没完成
+              throw new Error("保存分镜数据失败: " + e.message);
+            }
+          }
+          localStorage.removeItem("zctools_had_analysis_" + (state.currentProject ? state.currentProject.project_id : ""));
+          markPipelineStep(2, "completed");
+        }
 
 function renderShots(shots) {
   const grid = document.getElementById("shotsGrid");
@@ -1673,11 +1680,14 @@ async function markPipelineStep(stepIndex, status, errorMsg) {
       }
     }
   if (state.pipelineRun.steps[stepIndex - 1]) {
-    state.pipelineRun.steps[stepIndex - 1].status = status;
-    if (errorMsg !== undefined) {
-      state.pipelineRun.steps[stepIndex - 1].error = errorMsg;
+      state.pipelineRun.steps[stepIndex - 1].status = status;
+      if (errorMsg !== undefined) {
+        state.pipelineRun.steps[stepIndex - 1].error = errorMsg;
+      } else if (status === "pending") {
+        // 重置为 pending 时清除旧错误
+        state.pipelineRun.steps[stepIndex - 1].error = "";
+      }
     }
-  }
   // 持久化到后端
     var runId = state.pipelineRun.run_id || "run_" + Date.now().toString(36);
       var projId = typeof state.currentProject === "string" ? state.currentProject : (state.currentProject?.project_id || "");
@@ -1796,7 +1806,12 @@ async function runPipeline() {
       }
       const stepLabels = ["文案", "分镜+字幕+音频", "图片", "视频", "合成", "发送"];
 
-      // 找到第一个未完成的步骤
+            // 重置所有步骤的旧状态（清除上次的错误遗留）
+            for (let i = 0; i < 6; i++) {
+              markPipelineStep(i + 1, "pending");
+            }
+
+            // 找到第一个未完成的步骤
       var startFrom = steps.findIndex((s) => !s);
     if (startFrom === -1) {
       alert("所有步骤已完成！");
