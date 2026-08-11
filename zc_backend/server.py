@@ -1698,7 +1698,7 @@ async def _poll_photogpt_result_async(job_id: int, max_poll: int = 4) -> str:
         try:
             async with _httpx.AsyncClient(timeout=10) as client:
                 resp = await client.get(
-                    f"http://localhost:8005/api/photogpt/generate/jobs?page=1&page_size=2000",
+                    f"http://localhost:8005/api/photogpt/generate/jobs?page=1&page_size=200",
                 )
             if resp.status_code != 200:
                 continue
@@ -1727,7 +1727,7 @@ def _poll_photogpt_result(job_id: int, max_poll: int = 4) -> str:
             time.sleep(60)
         try:
             resp = _httpx.get(
-                f"http://localhost:8005/api/photogpt/generate/jobs?page=1&page_size=2000",
+                f"http://localhost:8005/api/photogpt/generate/jobs?page=1&page_size=200",
                 timeout=10, trust_env=False,
             )
             if resp.status_code != 200:
@@ -1773,35 +1773,128 @@ async def batch_generate_frames(req: BatchFrameRequest):
     if not frames:
         raise HTTPException(400, "frames 不能为空")
 
-    async def _run():
-        async def _gen_one(frame):
-            try:
-                f_req = FrameGenRequest(
-                    prompt=frame.get("prompt", ""),
-                    aspect_ratio=req.aspect_ratio,
-                    mode=frame.get("mode", "first_frame"),
-                    project_id=req.project_id,
-                    shot_idx=frame.get("shot_idx", 0),
-                    reference_images=req.reference_images,
-                )
-                result = await generate_frame(f_req)
-                return {"shot_idx": frame.get("shot_idx"), "mode": frame.get("mode"), "success": result.get("success"), "image_url": result.get("image_url", ""), "error": result.get("error", "")}
-            except Exception as e:
-                return {"shot_idx": frame.get("shot_idx"), "mode": frame.get("mode"), "success": False, "image_url": "", "error": str(e)}
+    async def _submit_one(frame):
+        """只提交到 8005，拿 job_id，不等生成结果"""
+        try:
+            f_req = FrameGenRequest(
+                prompt=frame.get("prompt", ""),
+                aspect_ratio=req.aspect_ratio,
+                mode=frame.get("mode", "first_frame"),
+                project_id=req.project_id,
+                shot_idx=frame.get("shot_idx", 0),
+                reference_images=req.reference_images,
+            )
+            # 只提交，不等轮询
+            result = _submit_frame_only(f_req)
+            return {"shot_idx": frame.get("shot_idx"), "mode": frame.get("mode"),
+                    "job_id": result.get("job_id"), "success": result.get("success"),
+                    "error": result.get("error", ""), "image_url": result.get("image_url", "")}
+        except Exception as e:
+            return {"shot_idx": frame.get("shot_idx"), "mode": frame.get("mode"),
+                    "success": False, "error": str(e), "image_url": ""}
 
-        # 逐个提交，等上一个返回 submitted 后再提交下一个
+    async def _poll_one(shot_idx, mode, job_id, project_id):
+        """独立轮询一张图片，成功后更新 completed_count 和结果"""
+        try:
+            image_url = await _poll_photogpt_result_async(job_id)
+            if image_url:
+                # 下载到项目本地
+                local_path = _download_to_project(project_id, "图片", image_url, f"shot_{shot_idx}_{mode}")
+                if local_path:
+                    rel_path = os.path.relpath(local_path, str(PROJECT_CONTENT_DIR))
+                    rel_parts = rel_path.replace("\\", "/").split("/")
+                    api_url = f"/api/project-files/{rel_parts[0]}/{rel_parts[1]}/{rel_parts[2]}"
+                    task = _batch_tasks.get(task_id)
+                    if task:
+                        task["completed_count"] = task.get("completed_count", 0) + 1
+                        # 更新对应结果
+                        for r in task.get("results", []):
+                            if r.get("shot_idx") == shot_idx and r.get("mode") == mode:
+                                r["success"] = True
+                                r["image_url"] = api_url
+                                break
+                    return
+            # 失败也计数
+            task = _batch_tasks.get(task_id)
+            if task:
+                task["completed_count"] = task.get("completed_count", 0) + 1
+        except Exception as e:
+            task = _batch_tasks.get(task_id)
+            if task:
+                task["completed_count"] = task.get("completed_count", 0) + 1
+                for r in task.get("results", []):
+                    if r.get("shot_idx") == shot_idx and r.get("mode") == mode:
+                        r["error"] = str(e)
+                        break
+
+    async def _run():
+        # 阶段1：逐个提交，只拿 job_id，不等结果
         results = []
         for f in frames:
-            result = await _gen_one(f)
-            results.append(result)
-            # 如果上一个提交失败，记录错误但继续下一个
-            logger.info("  batch frame shot_idx=%s mode=%s success=%s" % (f.get("shot_idx"), f.get("mode"), result.get("success")))
-        _batch_tasks[task_id] = {"status": "completed", "results": results, "total": len(frames)}
+            r = await _submit_one(f)
+            results.append(r)
+            logger.info("  batch frame submit shot_idx=%s mode=%s success=%s" % (f.get("shot_idx"), f.get("mode"), r.get("success")))
 
-    _batch_tasks[task_id] = {"status": "running", "results": [], "total": len(frames)}
+        _batch_tasks[task_id] = {"status": "running", "results": results, "total": len(frames), "completed_count": 0}
+
+        # 阶段2：每张图片独立轮询
+        for r in results:
+            if r.get("success") and r.get("job_id"):
+                _asyncio.ensure_future(_poll_one(
+                    r.get("shot_idx"), r.get("mode"), r.get("job_id"), req.project_id
+                ))
+            else:
+                # 提交失败的，直接计数
+                _batch_tasks[task_id]["completed_count"] = _batch_tasks[task_id].get("completed_count", 0) + 1
+
+    _batch_tasks[task_id] = {"status": "submitting", "results": [], "total": len(frames), "completed_count": 0}
     _asyncio.ensure_future(_run())
 
-    return {"task_id": task_id, "total": len(frames), "status": "running"}
+    return {"task_id": task_id, "total": len(frames), "status": "submitting"}
+
+
+def _submit_frame_only(req: FrameGenRequest) -> dict:
+    """只提交到 8005 的 photogpt/generate，拿 job_id，不等轮询结果（同步调用）"""
+    import httpx as _httpx
+    try:
+        payload = {
+            "prompt": req.prompt,
+            "aspect_ratio": req.aspect_ratio,
+            "output_num": 1,
+            "quality": "medium",
+            "resolution": "1K",
+        }
+        if req.reference_images:
+            input_urls = []
+            for ref in req.reference_images:
+                if ref.startswith("/api/project-files/"):
+                    parts = ref.replace("/api/project-files/", "").split("/")
+                    if len(parts) >= 3:
+                        fpath = PROJECT_CONTENT_DIR / parts[0] / parts[1] / parts[2]
+                        if fpath.exists():
+                            import base64, mimetypes
+                            mime, _ = mimetypes.guess_type(str(fpath))
+                            b64 = base64.b64encode(fpath.read_bytes()).decode()
+                            input_urls.append(f"data:{mime or 'image/png'};base64,{b64}")
+                        else:
+                            input_urls.append(ref)
+                    else:
+                        input_urls.append(ref)
+                else:
+                    input_urls.append(ref)
+            payload["input_urls"] = input_urls
+
+        with _httpx.Client(timeout=120, trust_env=False) as client:
+            resp = client.post(
+                "http://localhost:8005/api/photogpt/generate",
+                json=payload,
+            )
+        data = resp.json()
+        if data.get("success") and data.get("job_id"):
+            return {"success": True, "job_id": data["job_id"]}
+        return {"success": False, "error": data.get("error", "提交失败")}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @app.get("/api/batch-generate-frames/{task_id}")
@@ -1809,6 +1902,11 @@ async def batch_generate_frames_status(task_id: str):
     task = _batch_tasks.get(task_id)
     if not task:
         raise HTTPException(404, "任务不存在")
+    # 检查是否全部完成
+    total = task.get("total", 0)
+    completed = task.get("completed_count", 0)
+    if total > 0 and completed >= total and task.get("status") == "running":
+        task["status"] = "completed"
     return task
 
 
