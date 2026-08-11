@@ -754,14 +754,39 @@ def _run_llm_task(task_id: str, task_type: str, params: dict):
                             shot.setdefault("video_prompt", "")
                             shot.setdefault("first_frame_prompt", shot.get("prompt", ""))
                             shot.setdefault("last_frame_prompt", shot.get("prompt", ""))
-                            shot.setdefault("first_frame_prompt", shot.get("prompt", ""))
-                            shot.setdefault("last_frame_prompt", shot.get("prompt", ""))
                         with _task_lock:
                             _task_store[task_id] = {"status": "completed", "result": {"shots": shots, "srt": srt, "generated": True}}
                         logger.info(f"[LLM任务] analyze 完成: {task_id}, shots={len(shots)}")
                         return
                     except:
-                        pass
+                        # JSON 解析失败时，尝试修复常见问题后重试
+                        try:
+                            raw = json_match.group()
+                            # 去掉 markdown 代码块标记
+                            raw = re.sub(r'```json\s*|```\s*', '', raw)
+                            # 去掉末尾多余的逗号（常见 LLM 输出问题）
+                            raw = re.sub(r',\s*}', '}', raw)
+                            raw = re.sub(r',\s*]', ']', raw)
+                            parsed = json.loads(raw)
+                            shots = parsed.get("shots", [])
+                            srt = parsed.get("srt", [])
+                            if shots:
+                                for shot in shots:
+                                    shot.setdefault("framing", "")
+                                    shot.setdefault("motion", "")
+                                    shot.setdefault("lighting", "")
+                                    shot.setdefault("voiceover", "")
+                                    shot.setdefault("video_prompt", "")
+                                    shot.setdefault("first_frame_prompt", shot.get("prompt", ""))
+                                    shot.setdefault("last_frame_prompt", shot.get("prompt", ""))
+                                with _task_lock:
+                                    _task_store[task_id] = {"status": "completed", "result": {"shots": shots, "srt": srt, "generated": True}}
+                                logger.info(f"[LLM任务] analyze 完成(修复后): {task_id}, shots={len(shots)}")
+                                return
+                        except:
+                            pass
+                        # 修复后仍失败，保存原始 LLM 返回供调试
+                        logger.warning(f"[LLM任务] analyze JSON 解析失败: {task_id}, raw={result[:300]}")
                 with _task_lock:
                     _task_store[task_id] = {"status": "completed", "result": {"shots": [], "srt": [], "generated": True, "raw": result}}
                 logger.info(f"[LLM任务] analyze 完成(原始): {task_id}, raw_len={len(result) if result else 0}")
