@@ -577,6 +577,9 @@ async function analyzeScript() {
     }
 
     async function _handleAnalyzeResult(result) {
+          if (!result.shots || result.shots.length === 0) {
+            throw new Error("分析文案未生成分镜数据，请检查 LLM 配置");
+          }
           renderShots(result.shots || []);
           renderSRT(result.srt || []);
           localStorage.setItem(_projectKey("zctools_shots"), JSON.stringify(result.shots || []));
@@ -1825,11 +1828,14 @@ async function runPipeline() {
     }
 
     // 从第一个未完成的步骤开始执行
-        var currentStep = startFrom; // 记录当前执行到的步骤，用于错误定位
-        for (let i = startFrom; i < 6; i++) {
-          currentStep = i;
-          if (steps[i]) continue; // 已完成的跳过
-          stopBtn.textContent = "⏹ 步骤" + (i + 1) + "/6 " + stepLabels[i] + "...";
+            console.log("[pipeline] 开始流水线, startFrom=" + startFrom + ", steps=" + JSON.stringify(steps));
+            var currentStep = startFrom; // 记录当前执行到的步骤，用于错误定位
+            for (let i = startFrom; i < 6; i++) {
+              console.log("[pipeline] 循环 i=" + i + ", steps[" + i + "]=" + steps[i] + ", startFrom=" + startFrom);
+              currentStep = i;
+              if (steps[i]) continue; // 已完成的跳过
+              console.log("[pipeline] 执行步骤 " + (i + 1) + " (" + stepLabels[i] + ")");
+              stopBtn.textContent = "⏹ 步骤" + (i + 1) + "/6 " + stepLabels[i] + "...";
           markPipelineStep(i + 1, "running");
 
       if (i === 0) {

@@ -1804,6 +1804,8 @@ async def batch_generate_frames(req: BatchFrameRequest):
                     rel_path = os.path.relpath(local_path, str(PROJECT_CONTENT_DIR))
                     rel_parts = rel_path.replace("\\", "/").split("/")
                     api_url = f"/api/project-files/{rel_parts[0]}/{rel_parts[1]}/{rel_parts[2]}"
+                    # 直接写入 shot_data.json（不依赖前端 saveShotData）
+                    _save_shot_data_entry(project_id, shot_idx, mode, api_url)
                     task = _batch_tasks.get(task_id)
                     if task:
                         task["completed_count"] = task.get("completed_count", 0) + 1
@@ -2057,6 +2059,30 @@ def _save_data_url_to_project(project_id: str, subdir: str, data_url: str, filen
     except Exception as e:
         print(f"保存 data URL 异常: {e}")
         return ""
+
+
+def _save_shot_data_entry(project_id: str, shot_idx: int, mode: str, api_url: str):
+    """将生成的图片路径写入 shot_data.json（不依赖前端 saveShotData）"""
+    try:
+        proj_dir = PROJECT_CONTENT_DIR / project_id / "视频提示词"
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        shot_data_file = proj_dir / "shot_data.json"
+        shot_data = {}
+        if shot_data_file.exists():
+            shot_data = load_json(shot_data_file, {})
+        key = str(shot_idx)
+        if key not in shot_data:
+            shot_data[key] = {}
+        entry = shot_data[key]
+        field = "firstFrame" if mode == "first_frame" else "lastFrame"
+        entry[field] = api_url
+        entry[field + "ApiUrl"] = api_url
+        save_json(shot_data_file, shot_data)
+        logger.info(f"  shot_data.json 已写入: shot {shot_idx} {field} = {api_url}")
+    except Exception as e:
+        logger.warning(f"写入 shot_data.json 失败: {e}")
+
+
 
 
 
