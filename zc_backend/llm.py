@@ -282,8 +282,14 @@ def call_llm(
                 _mark_key_dead(key_entry)
                 continue
 
+            elif resp.status_code in (500, 502, 503, 504):
+                # 服务器临时错误，标记 key 挂掉并切换下一个（重试）
+                print(f"LLM Key [{key_entry['id'][:8]}] 服务器错误: {resp.status_code} {resp.text[:100]}")
+                _mark_key_dead(key_entry)
+                continue
+
             else:
-                # 其他错误（400, 500 等），直接返回失败
+                # 其他错误（400, 401 等），直接返回失败
                 print(f"LLM API error: {resp.status_code} {resp.text[:200]}")
                 return None
 
