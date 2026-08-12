@@ -1311,45 +1311,58 @@ async function batchGenFrames() {
         btn.textContent = `⏳ 生成中 0/${task.total}...`;
 
         // 轮询任务结果
-                let polled = 0;
-                while (true) {
-                  await new Promise(r => setTimeout(r, 3000));
-                  const status = await api("/batch-generate-frames/" + taskId);
-                  const completed = status.completed_count || 0;
-                  const total = status.total || 1;
-                  btn.textContent = `⏳ 生成中 ${completed}/${total}...`;
-                  if (status.status === "completed") {
-                    // 处理结果
-                    let success = 0, fail = 0;
-                    for (const r of status.results || []) {
-                      if (r.success) {
-                        success++;
-                        saveShotData(r.shot_idx, { [r.mode === "first_frame" ? "firstFrame" : "lastFrame"]: r.image_url, [r.mode === "first_frame" ? "firstFrameApiUrl" : "lastFrameApiUrl"]: r.image_url });
-                      } else {
-                        fail++;
-                      }
-                    }
-                    // 刷新显示
-                    if (state.selectedShotIdx !== null) selectShot(state.selectedShotIdx);
-                    if (state.currentProject) await saveProjectContent();
-                    btn.disabled = false;
-                                btn.textContent = originalText;
-                                window._batchCancelled = false;
-                                if (!window._pipelineRunning) alert(`批量生成完成！成功 ${success} 张，失败 ${fail} 张`);
-                                return;
-                  } else if (status.status === "error") {
-                    throw new Error(status.error || "批量生成失败");
-                  }
-                  // 更新进度
-                  polled++;
-                }
-      } catch (e) {
-        alert("批量生成失败: " + e.message);
-        btn.disabled = false;
-        btn.textContent = originalText;
-        window._batchCancelled = false;
-      }
-    }
+                        let polled = 0;
+                        while (true) {
+                          await new Promise(r => setTimeout(r, 3000));
+                          let status;
+                          try {
+                            status = await api("/batch-generate-frames/" + taskId);
+                          } catch (err) {
+                            // 任务不存在（如后端重启导致 _batch_tasks 丢失），停止轮询，不阻塞流水线
+                            console.warn("[batchGenFrames] 轮询失败，停止等待: " + err.message);
+                            break;
+                          }
+                          const completed = status.completed_count || 0;
+                          const total = status.total || 1;
+                          btn.textContent = `⏳ 生成中 ${completed}/${total}...`;
+                          if (status.status === "completed") {
+                            // 处理结果（部分成功也保存，不阻塞流水线）
+                            let success = 0, fail = 0;
+                            for (const r of status.results || []) {
+                              if (r.success) {
+                                success++;
+                                saveShotData(r.shot_idx, { [r.mode === "first_frame" ? "firstFrame" : "lastFrame"]: r.image_url, [r.mode === "first_frame" ? "firstFrameApiUrl" : "lastFrameApiUrl"]: r.image_url });
+                              } else {
+                                fail++;
+                              }
+                            }
+                            // 刷新显示
+                            if (state.selectedShotIdx !== null) selectShot(state.selectedShotIdx);
+                            if (state.currentProject) await saveProjectContent();
+                            btn.disabled = false;
+                                        btn.textContent = originalText;
+                                        window._batchCancelled = false;
+                                        if (!window._pipelineRunning && success > 0) alert(`批量生成完成！成功 ${success} 张，失败 ${fail} 张`);
+                                        return;
+                          } else if (status.status === "error") {
+                            // 任务失败也停止，不抛异常阻塞流水线
+                            console.warn("[batchGenFrames] 任务失败: " + (status.error || ""));
+                            btn.disabled = false;
+                            btn.textContent = originalText;
+                            window._batchCancelled = false;
+                            return;
+                          }
+                          // 更新进度
+                          polled++;
+                        }
+              } catch (e) {
+                // 不弹 alert，静默记录（流水线模式下不阻塞）
+                console.warn("[batchGenFrames] 异常: " + e.message);
+                btn.disabled = false;
+                btn.textContent = originalText;
+                window._batchCancelled = false;
+              }
+            }
 
           /**
            * 一键暂停批量生成 — 释放 shotGenerating 锁，重置所有占位文字
