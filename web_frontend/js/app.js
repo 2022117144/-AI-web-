@@ -537,10 +537,11 @@ async function analyzeScript() {
     if (script) {
       document.getElementById("storyInput").value = script;
     } else {
-      alert("请先在文案 Tab 生成或输入文案");
-      switchTab("script");
-      return;
-    }
+          alert("请先在文案 Tab 生成或输入文案");
+          switchTab("script");
+          if (window._pipelineRunning) throw new Error("文案为空，无法分析");
+          return;
+        }
   }
 
   const btn = document.getElementById("analyzeBtn");
