@@ -1781,6 +1781,22 @@ function resetPipelineDisplay() {
         }
       }
     } catch(e) { /* 忽略 */ }
+    // 额外获取当前 pipeline-status（文件存在性检查）
+    try {
+      var xhr2 = new XMLHttpRequest();
+      xhr2.open("GET", "/api/projects/" + state.currentProject.project_id + "/pipeline-status", false);
+      xhr2.send();
+      if (xhr2.status === 200) {
+        var steps = JSON.parse(xhr2.responseText).steps;
+        if (state.pipelineRun && state.pipelineRun.steps) {
+          for (var i = 0; i < steps.length && i < state.pipelineRun.steps.length; i++) {
+            if (steps[i] && state.pipelineRun.steps[i].status === "pending") {
+              state.pipelineRun.steps[i].status = "completed";
+            }
+          }
+        }
+      }
+    } catch(e) { /* 忽略 */ }
   }
   // 重渲染流水线步骤（从步骤定义重建 DOM）
   renderPipelineFlow();
