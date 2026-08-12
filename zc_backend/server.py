@@ -1809,8 +1809,13 @@ async def batch_generate_frames(req: BatchFrameRequest):
                 shot_idx=frame.get("shot_idx", 0),
                 reference_images=req.reference_images,
             )
-            # 只提交，不等轮询
-            result = _submit_frame_only(f_req)
+            # 只提交，不等轮询，附带 task_id 供 8005 回调
+            result = _submit_frame_only(f_req, extra={
+            "task_id": task_id,
+            "shot_idx": frame.get("shot_idx", 0),
+            "mode": frame.get("mode", "first_frame"),
+            "project_id": req.project_id,
+            })
             return {"shot_idx": frame.get("shot_idx"), "mode": frame.get("mode"),
                     "job_id": result.get("job_id"), "success": result.get("success"),
                     "error": result.get("error", ""), "image_url": result.get("image_url", "")}
@@ -1864,21 +1869,14 @@ async def batch_generate_frames(req: BatchFrameRequest):
 
         _batch_tasks[task_id] = {"status": "running", "results": results, "total": len(frames), "completed_count": 0}
 
-        # 阶段2：每张图片独立轮询
+        # 阶段2：不再轮询，等待回调更新 _batch_tasks
+        # 提交失败的直接计数
         for r in results:
-            if r.get("success") and r.get("job_id"):
-                _asyncio.ensure_future(_poll_one(
-                    r.get("shot_idx"), r.get("mode"), r.get("job_id"), req.project_id
-                ))
-            else:
-                # 提交失败的，直接计数
+            if not (r.get("success") and r.get("job_id")):
                 _batch_tasks[task_id]["completed_count"] = _batch_tasks[task_id].get("completed_count", 0) + 1
-        # 等待所有轮询完成（最多等 5 分钟）
-        for _ in range(300):
-            if _batch_tasks.get(task_id, {}).get("completed_count", 0) >= _batch_tasks[task_id]["total"]:
-                break
-            await _asyncio.sleep(1)
-        _batch_tasks[task_id]["status"] = "completed"
+        # 所有提交都失败时立即标记完成
+        if _batch_tasks[task_id]["completed_count"] >= _batch_tasks[task_id]["total"]:
+            _batch_tasks[task_id]["status"] = "completed"
 
     _batch_tasks[task_id] = {"status": "submitting", "results": [], "total": len(frames), "completed_count": 0}
     _asyncio.ensure_future(_run())
@@ -1886,8 +1884,10 @@ async def batch_generate_frames(req: BatchFrameRequest):
     return {"task_id": task_id, "total": len(frames), "status": "submitting"}
 
 
-def _submit_frame_only(req: FrameGenRequest) -> dict:
-    """只提交到 8005 的 photogpt/generate，拿 job_id，不等轮询结果（同步调用）"""
+def _submit_frame_only(req: FrameGenRequest, extra: dict = None) -> dict:
+    """只提交到 8005 的 photogpt/generate，拿 job_id，不等轮询结果（同步调用）
+    extra: 额外参数（task_id, shot_idx, mode），8005 回调时用
+    """
     import httpx as _httpx
     try:
         payload = {
@@ -1897,6 +1897,8 @@ def _submit_frame_only(req: FrameGenRequest) -> dict:
             "quality": "medium",
             "resolution": "1K",
         }
+        if extra:
+            payload.update(extra)
         if req.reference_images:
             input_urls = []
             for ref in req.reference_images:
@@ -1928,6 +1930,45 @@ def _submit_frame_only(req: FrameGenRequest) -> dict:
         return {"success": False, "error": data.get("error", "提交失败")}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# ============================================================
+# 回调接口：8005 的 _poll_generation 完成后通知 8765
+# ============================================================
+@app.post("/api/photogpt/callback")
+async def photogpt_callback(body: dict):
+    """8005 的 _poll_generation 完成后的回调，更新 _batch_tasks 状态"""
+    task_id = body.get("task_id", "")
+    status = body.get("status")
+    output_urls = body.get("output_urls", [])
+    project_id = body.get("project_id", "")
+    shot_idx = body.get("shot_idx")
+    mode = body.get("mode")
+    
+    task = _batch_tasks.get(task_id)
+    if not task:
+        return {"status": "ok", "note": "task not found"}
+    
+    if status == "success" and output_urls:
+        local_path = _download_to_project(project_id, "图片", output_urls[0], f"shot_{shot_idx}_{mode}")
+        if local_path:
+            rel_path = os.path.relpath(local_path, str(PROJECT_CONTENT_DIR))
+            rel_parts = rel_path.replace("\\", "/").split("/")
+            api_url = f"/api/project-files/{rel_parts[0]}/{rel_parts[1]}/{rel_parts[2]}"
+            _save_shot_data_entry(project_id, shot_idx, mode, api_url)
+            task["completed_count"] = task.get("completed_count", 0) + 1
+            for r in task.get("results", []):
+                if r.get("shot_idx") == shot_idx and r.get("mode") == mode:
+                    r["success"] = True
+                    r["image_url"] = api_url
+                    break
+    else:
+        task["completed_count"] = task.get("completed_count", 0) + 1
+    
+    if task["completed_count"] >= task["total"]:
+        task["status"] = "completed"
+    
+    return {"status": "ok"}
 
 
 @app.get("/api/batch-generate-frames/{task_id}")
