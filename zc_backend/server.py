@@ -1873,6 +1873,12 @@ async def batch_generate_frames(req: BatchFrameRequest):
             else:
                 # 提交失败的，直接计数
                 _batch_tasks[task_id]["completed_count"] = _batch_tasks[task_id].get("completed_count", 0) + 1
+        # 等待所有轮询完成（最多等 5 分钟）
+        for _ in range(300):
+            if _batch_tasks.get(task_id, {}).get("completed_count", 0) >= _batch_tasks[task_id]["total"]:
+                break
+            await _asyncio.sleep(1)
+        _batch_tasks[task_id]["status"] = "completed"
 
     _batch_tasks[task_id] = {"status": "submitting", "results": [], "total": len(frames), "completed_count": 0}
     _asyncio.ensure_future(_run())
