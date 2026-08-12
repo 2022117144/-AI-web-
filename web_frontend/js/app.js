@@ -1320,8 +1320,11 @@ async function batchGenFrames() {
                           } catch (err) {
                             // 任务不存在（如后端重启导致 _batch_tasks 丢失），停止轮询，不阻塞流水线
                             console.warn("[batchGenFrames] 轮询失败，停止等待: " + err.message);
+                            btn.disabled = false;
+                            btn.textContent = originalText;
+                            window._batchCancelled = false;
                             break;
-                          }
+                                                    }
                           const completed = status.completed_count || 0;
                           const total = status.total || 1;
                           btn.textContent = `⏳ 生成中 ${completed}/${total}...`;
