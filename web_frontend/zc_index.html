@@ -215,9 +215,17 @@ body{background:var(--bg)}
               <div class="pipe-arrow">↓</div>
               <div class="pipe-step" data-step="ffmpeg_merge"><div class="pipe-step-num">5</div><div class="pipe-step-body"><div class="pipe-step-name">整合视频 (ffmpeg)</div><div class="pipe-step-desc">拼接所有视频片段为完整视频 + 可选配乐</div></div></div>
               <div class="pipe-arrow">↓</div>
-              <div class="pipe-step" data-step="bgm_send"><div class="pipe-step-num">6</div><div class="pipe-step-body"><div class="pipe-step-name">加BGM → 发送</div><div class="pipe-step-desc">添加背景音乐并导出/发送成品</div></div></div>
+              <div class="pipe-step" data-step="bgm_send"><div class="pipe-step-num">6</div><div class="pipe-step-body"><div class="pipe-step-name">成片导出</div><div class="pipe-step-desc">验证成片并提供播放和下载</div></div></div>
             </div>
           </div>
+            <div style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--text-secondary)">
+              <label for="mediaBgmPath">背景音乐（可选）</label>
+              <input id="mediaBgmPath" type="hidden">
+              <span id="mediaBgmLabel">未选择，仅保留旁白</span>
+              <label class="btn btn-sm btn-outline" style="cursor:pointer">选择音乐<input type="file" accept="audio/*" style="display:none" onchange="chooseMediaBgm(this)"></label>
+              <button class="btn btn-sm btn-outline" onclick="clearMediaBgm()">移除</button>
+            </div>
+            <div id="pipelineResult" role="status" style="font-size:12px;color:var(--text-secondary)"></div>
             <div id="pipelineControls" style="display:none">
               <button class="btn btn-primary btn-lg" onclick="runPipeline()" id="runPipelineBtn">▶ 执行流水线</button>
               <button class="btn btn-danger btn-lg" onclick="stopPipeline()" id="stopPipelineBtn" style="display:none">⏹ 停止</button>
@@ -400,7 +408,8 @@ body{background:var(--bg)}
   </div>
 </div>
 
-<script src="js/app.js?v=8"></script>
+<script src="/js/media-client.js?v=1"></script>
+<script src="js/app.js?v=9"></script>
 <script>
 // 视觉风格预设
 var visualStyles = [];

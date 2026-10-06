@@ -17,6 +17,7 @@ from pathlib import Path
 
 # 流水线引擎
 import pipeline as pl
+import media_engine as media
 
 # LLM 客户端
 import llm as llm_mod
@@ -400,72 +401,37 @@ def get_project_content(project_id: str):
                             local_url = f"/api/project-files/{project_id}/图片/{fname}"
                             entry[field] = local_url
                             entry[f"{field}Local"] = f"{project_id}\图片\{fname}"
+    data["narration"] = media.read(proj_dir / "音频/narration.json", {})
     return data
 
 
 @app.get("/api/projects/{project_id}/pipeline-status")
 def get_pipeline_status(project_id: str):
-    """检查项目各流水线步骤的完成状态，用于前端自动判断从哪步开始"""
-    proj_dir = PROJECT_CONTENT_DIR / project_id
-    if not proj_dir.exists():
-        return {"steps": [False] * 6}
+    return media.status(project_id)
 
-    steps = [False] * 6
+@app.post("/api/projects/{project_id}/background-music")
+async def upload_background_music(project_id: str, request: Request):
+    import tempfile
+    if project_id not in load_json(PROJECTS_FILE, {}):
+        raise HTTPException(404, '项目不存在')
+    folder = media.project_dir(project_id) / '音频'
+    folder.mkdir(parents=True, exist_ok=True)
+    data = await request.body()
+    if not data or len(data) > 30 * 1024 * 1024:
+        raise HTTPException(400, '请选择小于 30 MB 的音频文件')
+    with tempfile.TemporaryDirectory(prefix='bgm_', dir=folder) as temporary:
+        path = Path(temporary) / 'input.audio'
+        path.write_bytes(data)
+        try:
+            media.probe(path, 'audio')
+            encoded = Path(temporary) / 'bgm.mp3'
+            media.process(['ffmpeg', '-y', '-v', 'error', '-i', path, '-vn', '-c:a', 'libmp3lame', '-b:a', '192k', encoded], timeout=120)
+            destination = folder / ('bgm_' + media.digest(list(data[:512]))[:12] + '_' + uuid.uuid4().hex[:6] + '.mp3')
+            os.replace(encoded, destination)
+        except Exception as error:
+            raise HTTPException(400, f'音频无法读取: {error}')
+    return {'bgm_path': str(destination), 'url': media.file_url(project_id, destination)}
 
-    # 步骤1: 文案 — 检查 文案/script.txt 是否有内容
-    script_file = proj_dir / "文案" / "script.txt"
-    if script_file.exists() and script_file.read_text(encoding="utf-8").strip():
-        steps[0] = True
-
-    # 步骤2: 分镜+字幕+音频 — 检查 视频提示词/shots.json 和 srt.json
-    shots_file = proj_dir / "视频提示词" / "shots.json"
-    srt_file = proj_dir / "视频提示词" / "srt.json"
-    if shots_file.exists() and srt_file.exists():
-        shots = load_json(shots_file, [])
-        srt = load_json(srt_file, [])
-        if shots and srt:
-            steps[1] = True
-
-    # 步骤3: 图片 — 检查图片数量是否满足分镜需求
-    # 规则：第一个分镜需要首帧+尾帧（2张），其余分镜各1张尾帧，合计 shots_count + 1 张
-    # 排除 _prev 备份文件
-    img_dir = proj_dir / "图片"
-    if img_dir.exists():
-        imgs = [f for f in img_dir.iterdir() if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") and not f.name.endswith("_prev.png") and not f.name.endswith("_prev.jpg") and not f.name.endswith("_prev.jpeg") and not f.name.endswith("_prev.webp")]
-        # 获取分镜数量
-        shots_file = proj_dir / "视频提示词" / "shots.json"
-        shot_count = 0
-        if shots_file.exists():
-            shots = load_json(shots_file, [])
-            shot_count = len(shots)
-        # 所需图片数 = 分镜数 + 1（首帧1张 + 每分镜1张尾帧，没有分镜时不算完成）
-        needed = shot_count + 1
-        if shot_count > 0 and len(imgs) >= needed:
-            steps[2] = True
-
-# 步骤4: 视频 — 检查视频数量是否等于分镜数（排除 _prev 备份文件）
-    video_dir = proj_dir / "视频"
-    if video_dir.exists():
-        videos = [f for f in video_dir.iterdir() if f.suffix.lower() in (".mp4", ".webm", ".mov") and not f.name.endswith("_prev.mp4") and not f.name.endswith("_prev.webm") and not f.name.endswith("_prev.mov")]
-    # 获取分镜数量
-        shots_file = proj_dir / "视频提示词" / "shots.json"
-        shot_count = 0
-        if shots_file.exists():
-            shots = load_json(shots_file, [])
-            shot_count = len(shots)
-        # 所需视频数 = 分镜数（没有分镜时不算完成）
-        if shot_count > 0 and len(videos) >= shot_count:
-            steps[3] = True
-
-    # 步骤5: 合成 — 检查是否有 merged_video.mp4
-    merged = proj_dir / "视频" / "merged_video.mp4"
-    if merged.exists():
-        steps[4] = True
-
-    # 步骤6: 发送 — 暂无可检查项，默认未完成
-    steps[5] = False
-
-    return {"steps": steps, "project_id": project_id}
 
 
 # ============================================================
@@ -1158,11 +1124,13 @@ def generate(req: GenerationRequest):
                 enhanced_prompt=req.enhanced_prompt,
                 params=req.params,
             )
+            if not isinstance(result, dict) or not result.get("success"):
+                raise ValueError((result or {}).get("error", "生成失败"))
             return GenerationResponse(task_id=task_id, status="completed", created_at=created_at)
         except Exception as e:
             return GenerationResponse(task_id=task_id, status=f"error: {e}", created_at=created_at)
 
-    return GenerationResponse(task_id=task_id, status="queued (no handler)", created_at=created_at)
+    raise HTTPException(501, "生成工具尚未配置，请使用项目配音或媒体任务接口")
 
 @app.get("/api/generate/{task_id}/status")
 def task_status(task_id: str):
@@ -1404,77 +1372,27 @@ def list_pipeline_handlers():
         stub=not (s["name"] in _handlers or s["name"] in {"script", "storyboard_with_audio", "ffmpeg_merge"}),
     ) for s in pl.PIPELINE_STEPS]
 
+_launch_lock = threading.Lock()
 @app.post("/api/pipeline/run")
 def run_pipeline(req: PipelineRunRequest):
-    project_data = {}
-    if req.project_id:
-        projects = load_json(PROJECTS_FILE, {})
-        project_data = projects.get(req.project_id, {})
-
-    run = pl.PipelineRun(project_id=req.project_id)
-    run.init_steps(req.config)
-    pl.save_run(run)
-
-    # 后台线程执行，API 立即返回
-    def _run_bg():
-        try:
-            run.run_sync(project_data)
-        except Exception as e:
-            run.status = "error"
-            run.error = str(e)
-            pl.save_run(run)
-
-    t = threading.Thread(target=_run_bg, daemon=True)
-    t.start()
-
+    media.project_dir(req.project_id)
+    projects = load_json(PROJECTS_FILE, {})
+    if req.project_id not in projects: raise HTTPException(404, '项目不存在')
+    if req.config.get('action', 'full') not in ('full', 'voice', 'export'):
+        raise HTTPException(400, '无效媒体任务')
+    with _launch_lock:
+        if any(r.status == 'running' for r in pl.get_project_runs(req.project_id)):
+            raise HTTPException(409, '该项目已有媒体任务正在执行')
+        run = pl.PipelineRun(project_id=req.project_id); run.init_steps(req.config)
+        run.status = 'running'; pl.save_run(run)
+        threading.Thread(target=run.run_sync, args=(projects[req.project_id],), daemon=True).start()
     return run.to_dict()
+
 
 @app.post("/api/pipeline/runs/{run_id}/step")
 def update_pipeline_step(run_id: str, req: dict = Body(...)):
-    runs = load_json(pl.RUNS_FILE, {})
-    if run_id in runs:
-        r = runs[run_id]
-        step_idx = req.get("step_index", -1)
-        status = req.get("status", "pending")
-        error = req.get("error", "")
-        steps = r.get("steps", [])
-        if status == "completed":
-            for i in range(step_idx + 1):
-                if i < len(steps):
-                    steps[i]["status"] = "completed"
-        if 0 <= step_idx < len(steps):
-            steps[step_idx]["status"] = status
-            if error:
-                steps[step_idx]["error"] = error
-            elif "error" in steps[step_idx]:
-                del steps[step_idx]["error"]
-        r["steps"] = steps
-        r["status"] = req.get("run_status", r.get("status", "pending"))
-        save_json(pl.RUNS_FILE, runs)
-        # 同步到内存字典（将 dict 转回 PipelineRun 对象）
-        _run = pl.PipelineRun(project_id=r.get("project_id", ""))
-        _run.run_id = run_id
-        _run.steps = r.get("steps", [])
-        _run.status = r.get("status", "idle")
-        pl._runs[run_id] = _run
-        return {"status": "ok", "run": r}
-    # 创建新运行记录
-    run = pl.PipelineRun(project_id=req.get("project_id", ""))
-    run.init_steps({})
-    run.run_id = run_id
-    step_idx = req.get("step_index", -1)
-    status = req.get("status", "pending")
-    error = req.get("error", "")
-    if status == "completed":
-        for i in range(step_idx + 1):
-            if i < len(run.steps):
-                run.steps[i]["status"] = "completed"
-    if 0 <= step_idx < len(run.steps):
-        run.steps[step_idx]["status"] = status
-        if error:
-            run.steps[step_idx]["error"] = error
-    pl.save_run(run)
-    return {"status": "ok", "run": run.to_dict()}
+    raise HTTPException(409, '流水线状态由后端任务和真实产物决定，请更新页面')
+
 
 @app.get("/api/pipeline/runs")
 def list_pipeline_runs(project_id: str = ""):
@@ -1495,22 +1413,10 @@ def get_pipeline_run(run_id: str):
 @app.post("/api/pipeline/runs/{run_id}/retry")
 def retry_pipeline_run(run_id: str):
     run = pl.get_run(run_id)
-    if not run:
-        raise HTTPException(404, "Run not found")
-    if run.status != "error":
-        raise HTTPException(400, "Only failed runs can be retried")
-    project_data = {}
-    if run.project_id:
-        projects = load_json(PROJECTS_FILE, {})
-        project_data = projects.get(run.project_id, {})
-    for step in run.steps:
-        if step["status"] == "error":
-            step["status"] = "pending"
-            step["error"] = ""
-            step["output"] = {}
-    result = run.run_sync(project_data)
-    pl.save_run(run)
-    return result
+    if not run: raise HTTPException(404, 'Run not found')
+    if run.status not in ('error', 'cancelled'): raise HTTPException(400, '仅可重试失败或取消的任务')
+    return run_pipeline(PipelineRunRequest(project_id=run.project_id, config=run.config))
+
 
 @app.post("/api/pipeline/runs/{run_id}/cancel")
 def cancel_pipeline_run(run_id: str):
@@ -1575,7 +1481,7 @@ def image_proxy(url: str):
 
     # 直接下载（带本地缓存）
     import hashlib
-    cache_dir = Path("D:/万象AI改/zc_backend/data/project_content/_cache")
+    cache_dir = PROJECT_CONTENT_DIR / '_cache'
     cache_dir.mkdir(parents=True, exist_ok=True)
     url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
     ext = ".png"
@@ -1623,7 +1529,7 @@ def video_proxy(url: str):
     if not url:
         raise HTTPException(400, "url 参数不能为空")
     import hashlib
-    cache_dir = Path("D:/万象AI改/zc_backend/data/project_content/_cache")
+    cache_dir = PROJECT_CONTENT_DIR / '_cache'
     cache_dir.mkdir(parents=True, exist_ok=True)
     url_hash = hashlib.md5(url.encode()).hexdigest()[:16]
     ext = ".mp4"
@@ -1633,20 +1539,17 @@ def video_proxy(url: str):
             break
     cache_file = cache_dir / f"{url_hash}{ext}"
     if cache_file.exists():
-        ct = "image/png" if ext == ".png" else "image/jpeg" if ext in (".jpg", ".jpeg") else "image/webp" if ext == ".webp" else "image/gif"
+        ct = {'.mp4':'video/mp4','.webm':'video/webm','.mov':'video/quicktime'}[ext]
         return Response(content=cache_file.read_bytes(), media_type=ct)
 
     proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
-    proxies = {"all://": proxy_url} if proxy_url else None
     try:
-        with _httpx.Client(proxies=proxies, timeout=60, follow_redirects=True) as client:
-            resp = client.get(url)
-        if resp.status_code == 200:
+        with _httpx.Client(proxy=proxy_url or None, timeout=60, follow_redirects=True) as client:
             resp = client.get(url,
                               headers={"User-Agent": "Mozilla/5.0", "Referer": "https://photogpt.io/"})
         if resp.status_code == 200:
             cache_file.write_bytes(resp.content)
-            ct = resp.headers.get("content-type", "image/png")
+            ct = {'.mp4':'video/mp4','.webm':'video/webm','.mov':'video/quicktime'}[ext]
             return Response(content=resp.content, media_type=ct)
     except Exception as e:
         print(f"[video-proxy] 下载失败: {e}")
@@ -2004,7 +1907,16 @@ async def generate_video(req: VideoGenRequest):
         if req.last_frame:
             input_images.append(req.last_frame)
         if input_images:
-            payload["input_images"] = input_images
+            import base64, mimetypes
+            converted = []
+            for image in input_images:
+                if image.startswith('data:') or image.startswith(('http://', 'https://')):
+                    converted.append(image)
+                else:
+                    image_path = media.local_path(req.project_id, image)
+                    mime = mimetypes.guess_type(str(image_path))[0] or 'image/png'
+                    converted.append('data:' + mime + ';base64,' + base64.b64encode(image_path.read_bytes()).decode())
+            payload["input_images"] = converted
 
         # 调 8005 不走代理（trust_env=False 跳过环境变量代理）
         async with _httpx.AsyncClient(timeout=30, trust_env=False) as _client:
@@ -2035,8 +1947,15 @@ async def generate_video(req: VideoGenRequest):
                         rel_parts = rel_path.replace("\\", "/").split("/")
                         video_url = f"/api/project-files/{rel_parts[0]}/{rel_parts[1]}/{rel_parts[2]}"
                 except Exception as e:
-                    print(f"视频下载到本地失败: {e}")
+                    raise RuntimeError(f"视频下载到本地失败: {e}")
+            if req.project_id:
+                media.probe(local_path, 'video')
+                data_file = media.project_dir(req.project_id) / '视频提示词/shot_data.json'
+                mapping = media.read(data_file, {})
+                mapping.setdefault(str(req.shot_idx), {}).update({'video': video_url, 'videoLocal': local_path})
+                media.write(data_file, mapping)
             return {"success": True, "video_url": video_url, "local_path": local_path, "job_id": job_id}
+        return {"success": False, "error": "视频生成返回空素材"}
     except _httpx.ConnectError:
         raise HTTPException(502, "无法连接视频生成后端 (localhost:8005)")
     except Exception as e:

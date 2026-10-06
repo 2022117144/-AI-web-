@@ -47,5 +47,5 @@ app.include_router(video_router.router)
 app.include_router(copy_router.router)
 app.include_router(project_router.router)
 app.include_router(tools_router.router)
-app.include_router(pipeline_router.router)
+
 app.include_router(storyboard_router.router)

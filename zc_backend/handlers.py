@@ -100,7 +100,7 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
     """
     shots = step_config.get("shots", [])
     if not shots:
-        return {"success": True, "output": {"images": [], "message": "无分镜，跳过"}, "error": ""}
+        return {"success": False, "output": {"images": [], "message": "无分镜，跳过"}, "error": ""}
 
     aspect_ratio = step_config.get("aspect_ratio", "16:9")
     ar_map = {"16:9": "16:9", "9:16": "9:16", "1:1": "1:1", "4:3": "4:3"}
@@ -108,8 +108,7 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
 
     # 第一步：收集所有需要提交的任务
     tasks = []  # [(shot_idx, frame_type, prompt)]
-    for shot in shots:
-        idx = shot.get("index", 0)
+    for idx, shot in enumerate(shots):
         prompt = shot.get("enhanced_prompt") or shot.get("prompt", "")
         if not prompt:
             logger.warning(f"分镜 #{idx} 无 prompt，跳过")
@@ -121,7 +120,7 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
         tasks.append((idx, "last_frame", prompt + ", end frame, concluding scene, zoom out"))
 
     if not tasks:
-        return {"success": True, "output": {"images": [], "message": "无任务"}, "error": ""}
+        return {"success": False, "output": {"images": [], "message": "无任务"}, "error": ""}
 
     logger.info(f"📷 photogpt: 同步提交 {len(tasks)} 个任务...")
 
@@ -200,7 +199,7 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
             urls.append(frames["first_frame"])
         if frames["last_frame"]:
             urls.append(frames["last_frame"])
-        if urls:
+        if frames.get("first_frame") and frames.get("last_frame"):
             success_count += 1
         else:
             errors.append(f"分镜 #{idx}: 无图片")
@@ -213,7 +212,7 @@ def photogpt_images_handler(project_data: dict, step_config: dict) -> dict:
         })
 
     return {
-        "success": True,
+        "success": bool(shots) and success_count == len(shots),
         "output": {
             "images": results,
             "shot_frames": shot_frames,
@@ -260,7 +259,7 @@ def insmind_video_handler(project_data: dict, step_config: dict) -> dict:
     """
     shots = step_config.get("shots", [])
     if not shots:
-        return {"success": True, "output": {"videos": [], "message": "无分镜，跳过"}, "error": ""}
+        return {"success": False, "output": {"videos": [], "message": "无分镜，跳过"}, "error": ""}
 
     model = step_config.get("model", "Pixverse-V6.0")
     ratio = step_config.get("ratio", "16:9")
@@ -270,8 +269,7 @@ def insmind_video_handler(project_data: dict, step_config: dict) -> dict:
     results = []
     errors = []
 
-    for shot in shots:
-        idx = shot.get("index", 0)
+    for idx, shot in enumerate(shots):
         prompt = shot.get("enhanced_prompt") or shot.get("prompt", "")
         if not prompt:
             results.append({"shot_index": idx, "video_url": "", "error": "无 prompt"})
@@ -392,7 +390,7 @@ def insmind_video_handler(project_data: dict, step_config: dict) -> dict:
             results.append({"shot_index": idx, "video_url": "", "error": str(e)})
 
     return {
-        "success": True,
+        "success": bool(shots) and sum(1 for r in results if r.get("video_url")) == len(shots),
         "output": {
             "videos": results,
             "shot_count": len(shots),
@@ -408,15 +406,10 @@ def insmind_video_handler(project_data: dict, step_config: dict) -> dict:
 # ============================================================
 
 def bgm_send_handler(project_data: dict, step_config: dict) -> dict:
-    """BGM+发送 — 返回占位，等待集成"""
-    merged_video = step_config.get("merged_video_path", "")
-    bgm_path = step_config.get("bgm_path", "")
-    return {
-        "success": True,
-        "output": {
-            "merged_video_path": merged_video,
-            "bgm_path": bgm_path,
-            "message": "BGM+发送功能待接",
-        },
-        "error": "",
-    }
+    import media_engine as media
+    pid = step_config.get('project_id') or project_data.get('project_id')
+    try:
+        if not media.final_valid(pid): raise ValueError('成片尚未生成或验证失败')
+        return {'success': True, 'output': media.read(media.project_dir(pid) / '视频/export.json'), 'error': ''}
+    except Exception as error:
+        return {'success': False, 'output': {}, 'error': str(error)}

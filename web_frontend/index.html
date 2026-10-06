@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=1280">
-<title>万象AI V9.19</title>
+<title>万象AI V9.20</title>
 <style>
 :root{--bg:#1e1e1e;--bg2:#252526;--bg3:#2d2d30;--text:#e0e0e0;--text2:#999;--border:#454545}
 *{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft YaHei","PingFang SC",sans-serif}
@@ -42,7 +42,7 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
 <body>
 <div class="app">
   <div class="title-bar">
-    <div class="icon">🪄</div><div class="title">万象AI <small class="version-tag">V9.19</small></div>
+    <div class="icon">🪄</div><div class="title">万象AI <small class="version-tag">V9.20</small></div>
     <div class="spacer"></div>
     <button class="win-btn">一</button><button class="win-btn">口</button><button class="win-btn close">✕</button>
   </div>
@@ -510,21 +510,36 @@ var sbShots = [];
 var sbGenStatus = {};
 var sbCurrentProject = '';
 
+function sbMediaUrl(url, local) {
+  if (url && url.startsWith('/api/project-files/')) return url;
+  if (!local) return url || '';
+  var path = local.replace(/\\/g, '/');
+  var marker = 'project_content/';
+  var index = path.indexOf(marker);
+  if (index >= 0) path = path.slice(index + marker.length);
+  if (path.startsWith('/api/project-files/')) return path;
+  return '/api/project-files/' + path;
+}
+
 function sbLoadFromProject(projectId) {
   if (!projectId) return;
   sbCurrentProject = projectId;
   fetch(API_BASE + '/api/projects/' + encodeURIComponent(projectId) + '/content')
     .then(function(r){return r.json()})
     .then(function(data){
+      if (sbCurrentProject !== projectId) return;
       if (data && data.shots && data.shots.length > 0) {
         sbShots = data.shots.map(function(s, i){
           var sd = (data.shot_data || {})[String(i)] || {};
           // 优先用本地路径（xxxLocal），没有才用 CDN URL
-          var firstFrame = sd.firstFrameLocal ? '/api/project-files/' + sd.firstFrameLocal.replace(/\\/g, '/') : (sd.firstFrame || '');
-          var lastFrame = sd.lastFrameLocal ? '/api/project-files/' + sd.lastFrameLocal.replace(/\\/g, '/') : (sd.lastFrame || '');
-          var video = sd.videoLocal ? '/api/project-files/' + sd.videoLocal.replace(/\\/g, '/') : (sd.video || '');
+          var firstFrame = sbMediaUrl(sd.firstFrame, sd.firstFrameLocal);
+          var lastFrame = sbMediaUrl(sd.lastFrame, sd.lastFrameLocal);
+          var video = sbMediaUrl(sd.video, sd.videoLocal);
           return {
+            originalShot: s,
+            originalData: sd,
             script: s.voiceover || '',
+            audio: data.narration?.entries?.[String(i)]?.url || '',
             prompt: s.prompt || '',
             character: sd.character || '',
             scene: sd.scene || '',
@@ -532,6 +547,8 @@ function sbLoadFromProject(projectId) {
             firstFrame: firstFrame,
             lastFrame: lastFrame,
             video: video,
+            firstFramePrompt: s.first_frame_prompt || '',
+            lastFramePrompt: s.last_frame_prompt || '',
           };
         });
         sbGenStatus = {};
@@ -577,7 +594,7 @@ function sbRender() {
                     '<td class="sb-col-asset"><div class="sb-asset-name" onclick="sbPickAsset(' + i + ',\'character\')">' + (s.character ? '<span class="sb-asset-text">' + s.character + '</span>' : '<span class="sb-asset-placeholder">添加角色</span>') + '</div></td>' +
                           '<td class="sb-col-asset"><div class="sb-asset-name" onclick="sbPickAsset(' + i + ',\'scene\')">' + (s.scene ? '<span class="sb-asset-text">' + s.scene + '</span>' : '<span class="sb-asset-placeholder">添加场景</span>') + '</div></td>' +
                           '<td class="sb-col-asset"><div class="sb-asset-name" onclick="sbPickAsset(' + i + ',\'prop\')">' + (s.prop ? '<span class="sb-asset-text">' + s.prop + '</span>' : '<span class="sb-asset-placeholder">添加道具</span>') + '</div></td>' +
-      '<td class="sb-col-action"><button class="sb-btn" onclick="sbGenVoice(' + i + ')">🎤 配音</button></td>' +
+      '<td class="sb-col-action"><button class="sb-btn" onclick="sbGenVoice(' + i + ')"' + (sbGenStatus[i]?.voice === 'loading' ? ' disabled' : '') + '>' + (sbGenStatus[i]?.voice === 'loading' ? '⏳ 配音中' : '🎤 配音') + '</button>' + (s.audio ? '<audio controls src="' + s.audio + '" style="width:100%;height:24px;margin-top:3px"></audio>' : '') + '</td>' +
             (i === 0 ? '<td class="sb-col-frame">' +
             '<div class="sb-frame-cell">' +
             '<div class="sb-frame-btns">' +
@@ -623,11 +640,12 @@ function saveSbData() {
   if (!sbCurrentProject) return;
   var shots = sbShots.map(function(s){
     return {
+      ...(s.originalShot || {}),
       index: 0,  // 占位，后端会重新编号
       scene: s.prompt || '',
       prompt: s.prompt || '',
       voiceover: s.script || '',
-      duration: 3,
+      duration: s.originalShot?.duration || 3,
       first_frame_prompt: s.firstFramePrompt || '',
       last_frame_prompt: s.lastFramePrompt || '',
     };
@@ -638,7 +656,7 @@ function saveSbData() {
     var shotData = {};
     sbShots.forEach(function(s, i){
       var key = String(i);
-      var entry = {};
+      var entry = {...(s.originalData || {})};
       if (s.character) entry.character = s.character;
       if (s.scene) entry.scene = s.scene;
       if (s.prop) entry.prop = s.prop;
@@ -670,11 +688,14 @@ function saveSbData() {
       }
       if (Object.keys(entry).length > 0) shotData[key] = entry;
     });
-  fetch(API_BASE + '/api/projects/' + encodeURIComponent(sbCurrentProject) + '/content', {
+  return fetch(API_BASE + '/api/projects/' + encodeURIComponent(sbCurrentProject) + '/content', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({shots: shots, shot_data: shotData})
-  }).catch(function(){});
+  }).then(function(response) {
+    if (!response.ok) throw new Error('保存分镜失败');
+    return response.json();
+  });
 }
 
 function loadSbData() {
@@ -758,7 +779,19 @@ function sbPickAsset(i, type) {
     .catch(function(){ alert('加载列表失败'); });
 }
 
-function sbGenVoice(i) { alert('配音生成功能待接入'); }
+async function sbGenVoice(i) {
+  const pid = sbCurrentProject;
+  if (!pid) { alert('请先选择项目'); return; }
+  sbGenStatus[i] = {...sbGenStatus[i], voice: 'loading'}; sbRender();
+  try {
+    await saveSbData();
+    const data = await WXMedia.voice(pid, i);
+    if (sbCurrentProject !== pid) return;
+    sbGenStatus[i].voice = 'done';
+    sbShots[i].audio = data.narration?.entries?.[String(i)]?.url || '';
+  } catch (error) { if (sbCurrentProject === pid) { sbGenStatus[i].voice = 'error'; alert(error.message); } }
+  finally { if (sbCurrentProject === pid) sbRender(); }
+}
 function sbGenFirstFrame(i) { alert('首帧生成功能待接入'); }
 function sbGenLastFrame(i) { alert('尾帧生成功能待接入'); }
 function sbGenVideo(i) {
@@ -998,5 +1031,6 @@ function sbBatchGenVideos() { _sbCallIframe('batchGenVideos'); }
 .sb-frame-placeholder{font-size:9px;color:var(--text2);text-align:center}
 .sb-frame-thumb{max-width:100%;max-height:100%;object-fit:contain;border-radius:2px}
 </style>
+<script src="/js/media-client.js?v=1"></script>
 </body>
 </html>

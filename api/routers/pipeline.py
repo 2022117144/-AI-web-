@@ -12,7 +12,7 @@ ZC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.ab
 if ZC_DIR not in sys.path:
     sys.path.insert(0, ZC_DIR)
 
-from zc_backend import pipeline as pipeline_mod
+import pipeline as pipeline_mod
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 

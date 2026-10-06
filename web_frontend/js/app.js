@@ -325,6 +325,7 @@ async function loadProjectContent(projectId, clearIfEmpty = false) {
   let hasData = false;
   try {
     const content = await api("/projects/" + projectId + "/content");
+    if (state.currentProject?.project_id !== projectId) return;
     // 恢复文案
         if (content.script_text) {
           document.getElementById("storyInput").value = content.script_text;
@@ -351,11 +352,10 @@ async function loadProjectContent(projectId, clearIfEmpty = false) {
       renderSRT(content.srt);
       hasData = true;
     }
-    // 恢复分镜图片/视频数据（直接缓存到 state，不走 localStorage）
-            if (content.shot_data && Object.keys(content.shot_data).length > 0) {
-                  state.shotDataCache = content.shot_data;
-              hasData = true;
-            }
+    // 同步服务器素材映射，避免后续保存覆盖后台生成的新素材。
+    state.shotDataCache = content.shot_data || {};
+    localStorage.setItem(_shotDataKey(), JSON.stringify(state.shotDataCache));
+    if (Object.keys(state.shotDataCache).length > 0) hasData = true;
         // 恢复宫格尺寸
             if (content.grid_size && document.getElementById("gridSizeSelect")) {
               document.getElementById("gridSizeSelect").value = content.grid_size;
@@ -410,6 +410,7 @@ function clearProjectContent() {
     localStorage.removeItem(_projectKey("zctools_srt"));
     localStorage.removeItem(_shotDataKey());
   state.currentShots = [];
+  state.shotDataCache = {};
   const grid = document.getElementById("shotsGrid");
   if (grid) grid.innerHTML = '<div class="shots-placeholder">未生成分镜</div>';
   document.getElementById("shotDetailPanel").style.display = "none";
@@ -752,12 +753,18 @@ function closePromptPopupOutside(e) {
   }
 }
 
-  function renderSRT(srtList) {
+function srtTime(value, fallback) {
+  if (typeof value !== 'number') return value || fallback;
+  const ms = Math.max(0, Math.round(value * 1000));
+  return [Math.floor(ms / 3600000), Math.floor(ms / 60000) % 60, Math.floor(ms / 1000) % 60]
+    .map(n => String(n).padStart(2, '0')).join(':') + ',' + String(ms % 1000).padStart(3, '0');
+}
+function renderSRT(srtList) {
   const srtEl = document.getElementById("srtOutput");
   if (!srtEl) return;
   if (!srtList || srtList.length === 0) { srtEl.value = "（未生成字幕）"; return; }
   srtEl.value = srtList.map((s, i) =>
-    `${i + 1}\n${s.start || "00:00:00,000"} --> ${s.end || "00:00:03,000"}\n${s.text}\n`
+    `${i + 1}\n${srtTime(s.start, "00:00:00,000")} --> ${srtTime(s.end, "00:00:03,000")}\n${s.text}\n`
   ).join("\n");
 }
 
@@ -1668,16 +1675,12 @@ async function generateVideo() {
 // ========== TTS ==========
 async function genTTS() {
   if (!requireProject()) return;
-  const task = { id: "tts-" + Date.now(), name: "语音生成", type: "tts", progress: 0 };
-  addTask(task);
+  const pid = state.currentProject.project_id;
   try {
-    const res = await api("/generate", {
-      body: { prompt: "", enhanced_prompt: document.getElementById("voiceoverInput").value || "TTS", task_type: "tts", params: {} },
-    });
-    updateTask(task.id, 100, res.status === "completed" ? "完成" : res.status);
-  } catch (e) {
-    updateTask(task.id, 0, "失败: " + e.message);
+    await saveProjectContent(); await WXMedia.voice(pid);
+    if (state.currentProject?.project_id === pid) { await loadProjectContent(pid); await loadPipelineRuns(); }
   }
+  catch (error) { alert('配音失败: ' + error.message); }
 }
 
 // ========== 任务队列 ==========
@@ -1697,43 +1700,7 @@ function renderTasks() {
 }
 
 // 标记流水线步骤完成（级联+持久化）
-async function markPipelineStep(stepIndex, status, errorMsg) {
-  // 更新本地 state
-  if (!state.pipelineRun) {
-    var pid = typeof state.currentProject === "string" ? state.currentProject : (state.currentProject?.project_id || "");
-    state.pipelineRun = { steps: [], run_id: "run_" + Date.now().toString(36), project_id: pid };
-    for (var i = 0; i < 6; i++) state.pipelineRun.steps.push({ status: "pending" });
-  }
-  // 级联：完成第N步时，前面所有步骤也标记为完成（error 时不级联，避免错误标记前序步骤）
-    if (status === "completed") {
-      for (var j = 0; j <= stepIndex - 1; j++) {
-        if (state.pipelineRun.steps[j] && state.pipelineRun.steps[j].status === "pending") {
-          state.pipelineRun.steps[j].status = "completed";
-        }
-      }
-    }
-  if (state.pipelineRun.steps[stepIndex - 1]) {
-      state.pipelineRun.steps[stepIndex - 1].status = status;
-      if (errorMsg !== undefined) {
-        state.pipelineRun.steps[stepIndex - 1].error = errorMsg;
-      } else if (status === "pending") {
-        // 重置为 pending 时清除旧错误
-        state.pipelineRun.steps[stepIndex - 1].error = "";
-      }
-    }
-  // 持久化到后端
-    var runId = state.pipelineRun.run_id || "run_" + Date.now().toString(36);
-      var projId = typeof state.currentProject === "string" ? state.currentProject : (state.currentProject?.project_id || "");
-      try {
-        await fetch("/api/pipeline/runs/" + runId + "/step", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({ step_index: stepIndex - 1, status: status, project_id: projId, run_id: runId, error: errorMsg || "" })
-        });
-      } catch(e) { console.warn("保存流水线状态失败:", e); }
-  // 重新渲染流水线
-  renderPipelineFlow();
-}
+async function markPipelineStep() { await loadPipelineRuns(); }
 
 // ========== 流水线 (Pipeline) ==========
 
@@ -1819,7 +1786,7 @@ function resetPipelineDisplay() {
   // 重置右侧面板流水线状态
   const rightStatus = document.getElementById("rightPipelineStatus");
   if (rightStatus) {
-    const labels = ["文案", "分镜+字幕+音频", "图片", "视频", "合成", "发送"];
+    const labels = ["文案", "分镜+字幕+音频", "图片", "视频", "合成", "导出"];
         rightStatus.innerHTML = labels.map((l, i) =>
           `<div>步骤 ${i + 1}/6 · ${l} ⏳</div>`
         ).join("") + '<div style="color:var(--text-muted);margin-top:8px;font-size:10px">点击流水线 Tab 查看详情</div>';
@@ -1833,189 +1800,90 @@ function resetPipelineDisplay() {
 
 async function runPipeline() {
   if (!requireProject()) return;
-  const projectId = state.currentProject ? state.currentProject.project_id : "";
-  if (!projectId) { alert("请先选择项目"); return; }
-
-  const btn = document.getElementById("runPipelineBtn");
-  const stopBtn = document.getElementById("stopPipelineBtn");
+  const projectId = state.currentProject.project_id;
+  const btn = document.getElementById('runPipelineBtn');
   btn.disabled = true;
-  btn.style.display = "none";
-  stopBtn.style.display = "inline-block";
-
   try {
-      // 标记为流水线执行模式，禁止弹窗
-      window._pipelineRunning = true;
-      var steps = [false, false, false, false, false, false];
-      try {
-        const status = await api("/projects/" + projectId + "/pipeline-status");
-        steps = status.steps || [false, false, false, false, false, false];
-      } catch(e) {
-        // 获取状态失败，从步骤0开始
-        console.warn("获取流水线状态失败，从头开始:", e.message);
-      }
-      const stepLabels = ["文案", "分镜+字幕+音频", "图片", "视频", "合成", "发送"];
+    await saveProjectContent();
+    const bgmPath = document.getElementById('mediaBgmPath')?.value.trim() || '';
+    const config = {action: 'full', insmind_video: {model: getVideoModel(), ratio: '16:9'},
+                    ffmpeg_merge: {ratio: '16:9', bgm_path: bgmPath}};
+    const run = await WXMedia.start(projectId, config);
+    state.lastRunId = run.run_id;
+    state.pipelineRuns = [run]; state.pipelineRun = run;
+    syncPipelineButtons();
+    await startPipelinePolling(run.run_id);
+  } catch (error) { alert(error.message); }
+  finally { await loadPipelineRuns(); }
+}
 
-            // 重置所有步骤的旧状态（清除上次的错误遗留）
-            for (let i = 0; i < 6; i++) {
-              markPipelineStep(i + 1, "pending");
-            }
-
-            // 找到第一个未完成的步骤
-      var startFrom = steps.findIndex((s) => !s);
-    if (startFrom === -1) {
-      alert("所有步骤已完成！");
-      syncPipelineButtons();
-      return;
-    }
-
-    // 标记前面已完成的步骤
-    for (let i = 0; i < startFrom; i++) {
-      if (steps[i]) markPipelineStep(i + 1, "completed");
-    }
-
-    // 从第一个未完成的步骤开始执行
-            console.log("[pipeline] 开始流水线, startFrom=" + startFrom + ", steps=" + JSON.stringify(steps));
-            var currentStep = startFrom; // 记录当前执行到的步骤，用于错误定位
-            for (let i = startFrom; i < 6; i++) {
-              console.log("[pipeline] 循环 i=" + i + ", steps[" + i + "]=" + steps[i] + ", startFrom=" + startFrom);
-              currentStep = i;
-              if (steps[i]) continue; // 已完成的跳过
-              console.log("[pipeline] 执行步骤 " + (i + 1) + " (" + stepLabels[i] + ")");
-              stopBtn.textContent = "⏹ 步骤" + (i + 1) + "/6 " + stepLabels[i] + "...";
-          markPipelineStep(i + 1, "running");
-
-      if (i === 0) {
-              // 步骤1: 文案 — 检查输入框是否有文案
-              const scriptText = document.getElementById("storyInput")?.value?.trim() || "";
-              if (!scriptText) {
-                throw new Error("请先输入文案内容");
-              }
-              markPipelineStep(1, "completed");
-      } else if (i === 1) {
-        // 步骤2: 分镜+字幕+音频 — 调用分析文案生成
-        await analyzeScript();
-        // analyzeScript 内部会调 markPipelineStep(2, "completed")
-      } else if (i === 2) {
-                                // 步骤3: 图片 — 先从后端加载分镜数据，再触发批量生成图片按钮并等待完成
-                                                          if (!state.currentShots || state.currentShots.length === 0) {
-                                                            try {
-                                                              var saved = JSON.parse(localStorage.getItem(_projectKey("zctools_shots_data")) || "[]");
-                                                              if (saved.length > 0) state.currentShots = saved;
-                                                            } catch(e) {}
-                                                          }
-                                                          // 如果 localStorage 也没有，从后端加载
-                                                          if (!state.currentShots || state.currentShots.length === 0) {
-                                                            try {
-                                                              var contentResp = await api("/projects/" + projectId + "/content");
-                                                              if (contentResp && contentResp.shots && contentResp.shots.length > 0) {
-                                                                state.currentShots = contentResp.shots;
-                                                                localStorage.setItem(_projectKey("zctools_shots_data"), JSON.stringify(contentResp.shots));
-                                                              }
-                                                            } catch(e) {}
-                                                          }
-                                                          var batchBtn = document.getElementById("batchGenBtn");
-                                                    if (batchBtn) {
-                                                      var p = batchBtn.onclick.call(batchBtn);
-                                                      if (p && p.then) await p;
-                                                    }
-                          // 执行后重新检查图片是否足够
-                          const status3 = await api("/projects/" + projectId + "/pipeline-status");
-                          if (!status3.steps[2]) {
-                      throw new Error("图片生成不足，无法继续下一步");
-                    }
-                    markPipelineStep(3, "completed");
-      } else if (i === 3) {
-                          // 步骤4: 视频 — 触发一键生成视频按钮并等待完成
-                                                    if (!state.currentShots || state.currentShots.length === 0) {
-                                                      try {
-                                                        var saved = JSON.parse(localStorage.getItem(_projectKey("zctools_shots_data")) || "[]");
-                                                        if (saved.length > 0) state.currentShots = saved;
-                                                      } catch(e) {}
-                                                    }
-                                                    var videoBtn = document.getElementById("batchVideoBtn");
-                                                    if (videoBtn) {
-                                                      var p = videoBtn.onclick.call(videoBtn);
-                                                      if (p && p.then) await p;
-                                                    }
-                          // 执行后重新检查视频是否足够
-                          const status4 = await api("/projects/" + projectId + "/pipeline-status");
-                          if (!status4.steps[3]) {
-                      throw new Error("视频生成不足，无法继续下一步");
-                    }
-                    markPipelineStep(4, "completed");
-      } else if (i === 4) {
-        // 步骤5: 合成 — 待实现
-        markPipelineStep(5, "completed");
-      } else if (i === 5) {
-        // 步骤6: 发送 — 待实现
-        markPipelineStep(6, "completed");
-      }
-
-      // 每步完成后重新获取状态，避免 steps 快照不更新导致循环判断错误
-      try {
-        const latest = await api("/projects/" + projectId + "/pipeline-status");
-        steps = latest.steps || steps;
-      } catch(e) { /* 忽略状态刷新失败 */ }
-    }
-
-    alert("流水线执行完成！");
-      } catch (e) {
-              // 标记当前步骤为失败（显示红色边框 + 错误信息）
-              // 用当前执行到的步骤 i，而不是过时的 steps 快照
-              var errStep = (typeof currentStep !== "undefined") ? currentStep : startFrom;
-              markPipelineStep(errStep + 1, "error", e.message);
-              alert("流水线执行失败: " + e.message);
-            }
-        finally { window._pipelineRunning = false; syncPipelineButtons(); }
+async function chooseMediaBgm(input) {
+  if (!requireProject() || !input.files[0]) return;
+  const pid = state.currentProject.project_id;
+  const file = input.files[0];
+  try {
+    const response = await fetch('/api/projects/' + encodeURIComponent(pid) + '/background-music', {
+      method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: file
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '音乐上传失败');
+    localStorage.setItem('wx_bgm_' + pid, JSON.stringify({path: data.bgm_path, name: file.name}));
+    if (state.currentProject?.project_id === pid) restoreMediaBgm();
+  } catch (error) { alert(error.message); }
+  finally { input.value = ''; }
+}
+function restoreMediaBgm() {
+  let bgm = {};
+  try { bgm = JSON.parse(localStorage.getItem('wx_bgm_' + state.currentProject?.project_id) || '{}'); } catch (_) {}
+  const path = document.getElementById('mediaBgmPath');
+  const label = document.getElementById('mediaBgmLabel');
+  if (path) path.value = bgm.path || '';
+  if (label) label.textContent = bgm.name || '未选择，仅保留旁白';
+}
+function clearMediaBgm() {
+  if (state.currentProject) localStorage.removeItem('wx_bgm_' + state.currentProject.project_id);
+  restoreMediaBgm();
 }
 
 let pipelinePollTimer = null;
 
-function startPipelinePolling(runId) {
-  if (pipelinePollTimer) clearInterval(pipelinePollTimer);
-  pipelinePollTimer = setInterval(async () => {
-    try {
-      const run = await api("/pipeline/runs/" + runId);
-      updatePipelineRunStatus(run);
-      await loadPipelineRuns();
-      if (run.status === "completed" || run.status === "error" || run.status === "cancelled") {
-        clearInterval(pipelinePollTimer);
-        pipelinePollTimer = null;
-        syncPipelineButtons();
+async function startPipelinePolling(runId) {
+  const pid = state.currentProject?.project_id;
+  try {
+    const final = await WXMedia.watch(runId, function (run) {
+      if (state.currentProject?.project_id !== run.project_id) return;
+      state.pipelineRun = run; state.pipelineRuns = [run];
+      state.lastRunId = run.run_id;
+      updatePipelineRunStatus(run); syncPipelineButtons();
+      const result = document.getElementById('pipelineResult');
+      if (result) {
+        result.replaceChildren();
+        if (run.status === 'completed' && run.final_url) {
+          const link = document.createElement('a'); link.href = run.final_url;
+          link.textContent = '▶ 打开成片'; link.target = '_blank';
+          const download = document.createElement('a'); download.href = run.final_url;
+          download.download = '万象AI成片.mp4'; download.textContent = '下载成片';
+          result.append(link, document.createTextNode('　'), download);
+        } else { result.textContent = run.error || (run.status === 'running' ? '后台处理中，可以切换页面；停止只取消当前任务。' : ''); }
       }
-    } catch {
-      clearInterval(pipelinePollTimer);
-      pipelinePollTimer = null;
+    });
+    if (state.currentProject?.project_id === pid) {
+      if (final.status === 'completed') await loadProjectContent(pid);
+      else if (final.status === 'error') alert('媒体任务失败: ' + final.error);
     }
-  }, 2000);
+    return final;
+  } catch (error) { if (state.currentProject?.project_id === pid) alert(error.message); }
 }
 
 async function stopPipeline() {
-  const stopBtn = document.getElementById("stopPipelineBtn");
-  stopBtn.disabled = true;
-  stopBtn.textContent = "⏹ 查找中...";
-  
-  // 实时查询最新运行记录，找到正在执行的流水线
-  let runId = null;
-  try {
-    const runs = await api("/pipeline/runs");
-    const running = runs.find((r) => r.status === "running");
-    if (running) runId = running.run_id;
-  } catch {}
-  
-  if (!runId) {
-    runId = state.lastRunId; // 兜底
-  }
-  if (!runId) { alert("没有正在执行的流水线"); stopBtn.disabled = false; stopBtn.textContent = "⏹ 停止"; return; }
-  
-  stopBtn.textContent = "⏹ 停止中...";
-  try {
-    await api("/pipeline/runs/" + runId + "/cancel", { method: "POST" });
-  } catch (e) { alert("停止失败: " + e.message); }
-  finally {
-    stopBtn.disabled = false;
-    stopBtn.textContent = "⏹ 停止中";
-  }
+  if (!state.currentProject) return;
+  const pid = state.currentProject.project_id;
+  const run = state.pipelineRuns.find(r => r.project_id === pid && r.status === 'running');
+  if (!run) { await loadPipelineRuns(); return; }
+  const button = document.getElementById('stopPipelineBtn');
+  button.disabled = true; button.textContent = '⏹ 停止中...';
+  try { await WXMedia.cancel(run.run_id, pid); }
+  catch (error) { alert(error.message); button.disabled = false; }
 }
 
 function updatePipelineRunStatus(run) {
@@ -2060,23 +1928,38 @@ function syncPipelineButtons() {
 }
 
 async function loadPipelineRuns() {
+  if (!state.currentProject) return;
+  restoreMediaBgm();
+  const pid = state.currentProject.project_id;
   try {
-    const projectId = state.currentProject ? state.currentProject.project_id : "";
-    const runs = await api("/pipeline/runs" + (projectId ? "?project_id=" + projectId : ""));
+    const runs = await api('/pipeline/runs?project_id=' + encodeURIComponent(pid));
+    if (state.currentProject?.project_id !== pid) return;
     state.pipelineRuns = runs;
-    
-    // 同步按钮状态
+    const running = runs.find(r => r.status === 'running');
+    if (running) {
+      state.pipelineRun = running; state.lastRunId = running.run_id;
+      updatePipelineRunStatus(running);
+      startPipelinePolling(running.run_id);
+    } else {
+      const verified = await api('/projects/' + encodeURIComponent(pid) + '/pipeline-status');
+      if (state.currentProject?.project_id !== pid) return;
+      const last = runs[0];
+      state.pipelineRun = {steps: state.pipelineSteps.map((s, i) => ({...s, status: verified.steps[i] ? 'completed' : 'pending'}))};
+      if (last?.status === 'error' && last.steps[last.current_step]) {
+        state.pipelineRun.steps[last.current_step] = last.steps[last.current_step];
+      }
+      renderPipelineFlow();
+      const result = document.getElementById('pipelineResult');
+      if (result) {
+        result.replaceChildren();
+        if (verified.final_url) {
+          const link = document.createElement('a'); link.href = verified.final_url; link.target = '_blank'; link.textContent = '▶ 打开 / 下载成片';
+          result.appendChild(link);
+        } else result.textContent = last?.error || '';
+      }
+    }
     syncPipelineButtons();
-    
-    const listEl = document.getElementById("pipelineRunList");
-    if (!listEl) return;
-    if (runs.length === 0) { listEl.innerHTML = '<div class="pipeline-placeholder">暂无执行记录</div>'; return; }
-    listEl.innerHTML = runs.map((r) => `
-      <div class="run-card ${r.status}" onclick="showPipelineRunDetail('${r.run_id}')">
-        <div class="run-card-header"><span class="run-status run-${r.status}">${statusIcon(r.status)} ${r.status}</span><span class="run-id">${r.run_id.slice(0, 12)}…</span><span class="run-time">${formatTime(r.created_at)}</span></div>
-        <div class="run-card-steps">${(r.steps || []).map((s) => `<span class="step-dot step-${s.status}" title="${s.label}: ${s.status}"></span>`).join("")}</div>
-      </div>`).join("");
-  } catch (e) { console.warn("流水线记录加载失败:", e.message); }
+  } catch (error) { console.warn('加载媒体任务状态失败:', error); }
 }
 
 async function showPipelineRunDetail(runId) {
@@ -2138,7 +2021,7 @@ async function generateScript() {
       localStorage.setItem(_projectKey("zctools_script"), result.script);
       updateCharCount();
       if (state.currentProject) saveProjectContent();
-      markPipelineStep(2, "completed");
+      markPipelineStep(1, "completed");
     }
 
 // ========== AI 修改文案 ==========

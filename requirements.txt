@@ -1,0 +1,6 @@
+fastapi>=0.110,<1
+uvicorn>=0.29,<1
+httpx>=0.27,<1
+requests>=2.31,<3
+edge-tts>=7.2.8,<8
+python-multipart>=0.0.9

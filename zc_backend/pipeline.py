@@ -2,21 +2,20 @@
 智创工具 — 流水线引擎
 =====================
 按手绘流程图定义的 AI 视频自动生成管线：
-  文案 → 分镜提示词+STR字幕+音频 → photogpt(待接) → 分镜图片
-    → insm后端(待接) → 视频
-    → ffmpeg(待接) → 整合视频
-    → +BGM(待接) → 发送(待接)
+  文案 → 分镜提示词+SRT字幕+配音 → 分镜首尾帧 → 视频
+    → FFmpeg 拼接、字幕和可选配乐 → 验证成片并导出
 
-每步 handler 可插拔注册，未注册时返回"待接"桩。
+media_engine 执行真实媒体任务；缺失素材、失败和取消均如实记录。
 
 架构说明：
 - 这是整个项目唯一的流水线定义。PIPELINE_STEPS 是唯一的数据源。
 - 前端 zc_index.html 的 #tab-pipeline 通过 GET /api/pipeline/steps 动态渲染。
 - 万象AI主界面 index.html 的 #wx-pipeline 只是一个 iframe 容器，嵌的是 zc_index.html?tab=pipeline。
-- 不存在两套流水线。所有改动都在这里。
+- 后端任务是执行与状态的唯一来源，前端只提交任务、轮询和取消。
 """
 
-import json, os, uuid, requests, time
+import json, os, uuid, requests, time, threading
+import media_engine as media
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -41,8 +40,8 @@ PIPELINE_STEPS = [
     },
     {
         "name": "storyboard_with_audio",
-        "label": "分镜提示词 + STR字幕 + 音频",
-        "description": "从文案生成分镜提示词 + STR字幕 + 旁白配音音频",
+        "label": "分镜提示词 + SRT字幕 + 音频",
+        "description": "从文案生成分镜提示词、配音和真实时间戳字幕",
         "optional": False,
         "inputs": ["script_text", "shot_count", "characters", "voice_name"],
     },
@@ -69,8 +68,8 @@ PIPELINE_STEPS = [
     },
     {
         "name": "bgm_send",
-        "label": "加BGM → 发送",
-        "description": "添加背景音乐并导出/发送成品",
+        "label": "成片导出",
+        "description": "验证成片音视频并提供下载",
         "optional": False,
         "inputs": ["merged_video_path", "bgm_path"],
     },
@@ -91,7 +90,7 @@ _handlers: Dict[str, StepHandler] = {}
 # 内置"待接"桩 handler
 def _stub_handler(project_data: dict, step_config: dict) -> dict:
     return {
-        "success": True,
+        "success": False,
         "output": {"stub": True, "message": "接口待接 — 输出占位"},
         "error": "",
     }
@@ -105,7 +104,7 @@ def _script_handler(project_data: dict, step_config: dict) -> dict:
     if not script_text:
         script_text = project_data.get("original_voiceover_text", "") or project_data.get("rewritten_voiceover_text", "")
     return {
-        "success": True,
+        "success": bool(script_text.strip()),
         "output": {"script_text": script_text},
         "error": "",
     }
@@ -133,221 +132,40 @@ TTS_OUTPUT_DIR = Path(__file__).parent / "data" / "tts_output"
 
 
 def _call_edge_tts(text: str, voice: str = "zh-CN-XiaoxiaoNeural") -> dict:
-    """
-    调用 edge-tts（本地免费）生成音频。
-    10秒超时机制 — 超时或失败时直接跳过（不阻塞流水线）。
-    """
-    TTS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    task_id = uuid.uuid4().hex[:16]
-    audio_path = TTS_OUTPUT_DIR / f"{task_id}.mp3"
-
-    import subprocess as _sp
-    wrapper = str(Path(__file__).parent / "_edge_tts_wrapper.py")
-    env = os.environ.copy()
-    for k in list(env.keys()):
-        if k.upper() in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "PYTHONPATH", "PYTHONHOME", "PYTHONASYNCIODLL"):
-            env.pop(k, None)
-
-    # 只尝试 1 次，10 秒超时
     try:
-        proc = _sp.run(
-            [sys.executable, wrapper, text, voice, str(audio_path)],
-            capture_output=True, text=True, timeout=10,
-            env=env,
-        )
-    except (_sp.TimeoutExpired, Exception):
-        return {"success": True, "output": {"skipped": True, "message": "TTS 超时（10s），已跳过"}}
+        path = TTS_OUTPUT_DIR / (uuid.uuid4().hex + '.mp3')
+        data = json.loads(media.process([sys.executable, Path(__file__).parent / '_edge_tts_wrapper.py', '-', voice, path],
+                         timeout=max(120, min(900, len(text)*2)), input_text=text))
+        duration, _ = media.probe(path, 'audio')
+        return {'success': True, 'output': {'audio_path': str(path), 'duration_ms': round(duration*1000), 'events': data['events']}}
+    except Exception as error:
+        return {'success': False, 'output': {}, 'error': str(error)}
 
-    if proc.returncode == 0 and audio_path.exists():
-        try:
-            data = json.loads(proc.stdout)
-            if data.get("success"):
-                return {
-                    "success": True,
-                    "output": {
-                        "audio_path": data["path"],
-                        "duration_ms": data.get("duration_ms", 0),
-                        "task_id": task_id,
-                        "voice": voice,
-                    }
-                }
-        except json.JSONDecodeError:
-            pass
-
-    # 失败 → 跳过
-    return {"success": True, "output": {"skipped": True, "message": "TTS 生成失败，已跳过"}}
 
 
 def _script_audio_handler(project_data: dict, step_config: dict) -> dict:
-    script_text = step_config.get("script_text", "")
-    if not script_text:
-        script_text = project_data.get("original_full_script", "") or project_data.get("original_story_desc", "")
-    voice_name = step_config.get("voice_name", "zh-CN-XiaoxiaoNeural")
+    script_text = step_config.get('script_text') or project_data.get('original_full_script') or ''
+    if not script_text.strip(): return {'success': False, 'output': {}, 'error': '配音文本为空'}
+    return _call_edge_tts(script_text, step_config.get('voice_name', 'zh-CN-XiaoxiaoNeural'))
 
-    # 映射 doubao 语音名到 edge-tts 语音名
-    voice_map = {
-        "zh_female_vv_uranus_bigtts": "zh-CN-XiaoxiaoNeural",
-        "zh_female_2024_songs_female": "zh-CN-XiaoyiNeural",
-        "zh_female_2024_conversational_female": "zh-CN-XiaoxiaoNeural",
-        "zh_female_2024_story_female": "zh-CN-XiaoxiaoNeural",
-        "zh_male_2024_story_male": "zh-CN-YunxiNeural",
-    }
-    mapped_voice = voice_map.get(voice_name, voice_name)
-
-    if not script_text:
-        return {
-            "success": True,
-            "output": {"message": "无文案内容，跳过 STR 生成", "audio_path": "", "srt_path": ""},
-            "error": "",
-        }
-
-    result = _call_edge_tts(script_text, mapped_voice)
-    if result["success"]:
-        output = result.get("output", {})
-        # 检查是否跳过
-        if output.get("skipped"):
-            return {
-                "success": True,
-                "output": {
-                    "script_text": script_text,
-                    "voice_name": mapped_voice,
-                    "audio_path": "",
-                    "srt_path": "",
-                    "duration_ms": 0,
-                    "skipped": True,
-                    "message": output.get("message", "TTS 已跳过"),
-                },
-                "error": "",
-            }
-        return {
-            "success": True,
-            "output": {
-                "script_text": script_text,
-                "voice_name": mapped_voice,
-                "audio_path": output.get("audio_path", ""),
-                "srt_path": "",
-                "duration_ms": output.get("duration_ms", 0),
-            },
-            "error": "",
-        }
-    else:
-        # 失败也跳过（不阻塞）
-        return {
-            "success": True,
-            "output": {
-                "script_text": script_text,
-                "voice_name": mapped_voice,
-                "audio_path": "",
-                "srt_path": "",
-                "duration_ms": 0,
-                "skipped": True,
-                "message": result.get("error", "TTS 失败，已跳过"),
-            },
-            "error": "",
-        }
 
 def _storyboard_with_audio_handler(project_data: dict, step_config: dict) -> dict:
-    """合并步骤：复用 POST /api/script/task 分析文案，再生成旁白音频"""
-    script_text = step_config.get("script_text", "")
-    if not script_text:
-        script_text = project_data.get("original_full_script", "") or project_data.get("original_story_desc", "")
-    if not script_text:
-        script_text = project_data.get("original_voiceover_text", "") or project_data.get("rewritten_voiceover_text", "")
+    try:
+        pid = step_config.get('project_id') or project_data.get('project_id')
+        doc = media.content(pid)
+        result = media.narrate(pid, doc['shots'], step_config.get('voice_name', 'zh-CN-XiaoxiaoNeural'))
+        return {'success': True, 'output': {'shots': doc['shots'], 'shot_count': len(doc['shots']), 'narration': result}}
+    except Exception as error:
+        return {'success': False, 'output': {}, 'error': str(error)}
 
-    shot_count = step_config.get("shot_count", 5)
-    characters = step_config.get("characters", [])
-    voice_name = step_config.get("voice_name", "zh-CN-XiaoxiaoNeural")
-
-    if not script_text:
-        return {"success": True, "output": {"shots": [], "shot_count": 0, "srt": [], "audio_path": "", "message": "无文案内容"}, "error": ""}
-
-    # ========== 1. 复用 POST /api/script/task 分析文案 ==========
-    # 从 server 模块获取任务函数
-    from server import _run_llm_task, _task_store, _task_lock
-    import uuid
-
-    task_id = uuid.uuid4().hex[:12]
-    with _task_lock:
-        _task_store[task_id] = {"status": "running", "result": None}
-
-    params = {
-        "topic": script_text,
-        "project_id": step_config.get("project_id", ""),
-        "style_anchor": step_config.get("style_anchor", ""),
-    }
-    _run_llm_task(task_id, "analyze", params)
-
-    # 等待任务完成（同步等待，最多 60s）
-    import time
-    deadline = time.time() + 60
-    shots = []
-    srt = []
-    llm_generated = False
-    while time.time() < deadline:
-        with _task_lock:
-            task = _task_store.get(task_id)
-        if task and task["status"] in ("completed", "error"):
-            if task.get("result"):
-                shots = task.get("result", {}).get("shots", [])
-                srt = task.get("result", {}).get("srt", [])
-                llm_generated = bool(shots)
-            break
-        time.sleep(0.5)
-
-    # ========== 2. TTS 生成旁白音频 ==========
-    voice_map = {
-        "zh_female_vv_uranus_bigtts": "zh-CN-XiaoxiaoNeural",
-        "zh_female_2024_songs_female": "zh-CN-XiaoyiNeural",
-        "zh_female_2024_conversational_female": "zh-CN-XiaoxiaoNeural",
-        "zh_female_2024_story_female": "zh-CN-XiaoxiaoNeural",
-        "zh_male_2024_story_male": "zh-CN-YunxiNeural",
-    }
-    mapped_voice = voice_map.get(voice_name, voice_name)
-
-    tts_result = _call_edge_tts(script_text, mapped_voice)
-    audio_path = ""
-    duration_ms = 0
-    tts_skipped = False
-    if tts_result.get("success"):
-        tts_output = tts_result.get("output", {})
-        if tts_output.get("skipped"):
-            tts_skipped = True
-        else:
-            audio_path = tts_output.get("audio_path", "")
-            duration_ms = tts_output.get("duration_ms", 0)
-    else:
-        tts_skipped = True
-
-    return {
-        "success": True,
-        "output": {
-            "shots": shots,
-            "shot_count": len(shots),
-            "srt": srt,
-            "llm_generated": llm_generated,
-            "script_text": script_text,
-            "voice_name": mapped_voice,
-            "audio_path": audio_path,
-            "duration_ms": duration_ms,
-            "tts_skipped": tts_skipped,
-        },
-        "error": "",
-    }
 
 def _ffmpeg_merge_handler(project_data: dict, step_config: dict) -> dict:
-    """ffmpeg 视频拼接（框架，实际 ffmpeg 调用待接）"""
-    video_paths = step_config.get("video_paths", [])
-    bgm_path = step_config.get("bgm_path", "")
-    return {
-        "success": True,
-        "output": {
-            "video_paths": video_paths,
-            "bgm_path": bgm_path,
-            "merged_path": "",
-            "has_bgm": bool(bgm_path),
-        },
-        "error": "",
-    }
+    try:
+        result = media.assemble(step_config.get('project_id') or project_data.get('project_id'), step_config)
+        return {'success': True, 'output': result, 'error': ''}
+    except Exception as error:
+        return {'success': False, 'output': {}, 'error': str(error)}
+
 
 
 def register_step_handler(step_name: str, handler: StepHandler):
@@ -387,9 +205,11 @@ class PipelineRun:
         self.updated_at = self.created_at
         self.error = ""
         self.cancel_requested = False
+        self.config = {}
 
     def init_steps(self, config: Dict[str, Any]):
         """用配置初始化步骤状态"""
+        self.config = config
         self.steps = []
         for step_def in PIPELINE_STEPS:
             name = step_def["name"]
@@ -411,6 +231,8 @@ class PipelineRun:
     def to_dict(self) -> dict:
         return {
             "run_id": self.run_id,
+            "config": self.config,
+            "final_url": next((s.get("output", {}).get("final_url", "") for s in reversed(self.steps) if s.get("output", {}).get("final_url")), ""),
             "project_id": self.project_id,
             "status": self.status,
             "current_step": self.current_step,
@@ -424,6 +246,7 @@ class PipelineRun:
                     "status": s["status"],
                     "output_summary": _summarize_output(s.get("output", {})),
                     "error": s.get("error", ""),
+                    "output": s.get("output", {}),
                 }
                 for s in self.steps
             ],
@@ -433,67 +256,31 @@ class PipelineRun:
         }
 
     def run_sync(self, project_data: dict) -> dict:
-        """同步执行所有步骤（每步结束后存盘，支持前端轮询）"""
-        self.status = "running"
-        self.updated_at = datetime.now().isoformat()
-        save_run(self)
-
-        accumulated = {}  # 累积前序步骤的输出
-
-        for i, step in enumerate(self.steps):
-            self.current_step = i
-
-            # 检查是否请求取消
-            if self.cancel_requested:
-                self.status = "cancelled"
-                self.error = "用户取消执行"
-                save_run(self)
-                return self.to_dict()
-
-            # 可选步骤：跳过
-            if step["optional"] and not step["config"]:
-                step["status"] = "skipped"
-                save_run(self)
-                continue
-
-            step["status"] = "running"
+        lock = media.project_lock(self.project_id)
+        if not lock.acquire(blocking=False):
+            self.status = 'error'; self.error = '该项目已有媒体任务正在执行'; save_run(self)
+            return self.to_dict()
+        try:
+            self.status = 'running'; save_run(self)
+            media.execute(self, self.config)
+            media.check(lambda: self.cancel_requested)
+            self.status = 'completed'
+        except media.Cancelled as error:
+            self.status = 'cancelled'; self.error = str(error)
+            if self.current_step >= 0: self.steps[self.current_step]['status'] = 'cancelled'
+        except Exception as error:
+            self.status = 'error'; self.error = str(error)
+            if self.current_step >= 0:
+                self.steps[self.current_step]['status'] = 'error'
+                self.steps[self.current_step]['error'] = str(error)
+        finally:
             self.updated_at = datetime.now().isoformat()
-            save_run(self)
-
-            # 合并累积输出到当前步骤配置
-            merged_config = {**accumulated, **step["config"]}
-
             try:
-                handler = get_step_handler(step["name"])
-                result = handler(project_data, merged_config)
-                if result.get("success"):
-                    step["status"] = "completed"
-                    step["output"] = result.get("output", {})
-                    step["error"] = ""
-                    # 将当前步骤输出加入累积（供后续步骤使用）
-                    accumulated.update(result.get("output", {}))
-                else:
-                    step["status"] = "error"
-                    step["error"] = result.get("error", "未知错误")
-                    self.status = "error"
-                    self.error = f"步骤 {step['label']} 失败: {step['error']}"
-                    save_run(self)
-                    return self.to_dict()
-            except Exception as e:
-                step["status"] = "error"
-                step["error"] = str(e)
-                self.status = "error"
-                self.error = f"步骤 {step['label']} 异常: {e}"
                 save_run(self)
-                return self.to_dict()
-
-            save_run(self)
-
-        self.status = "completed"
-        self.current_step = len(self.steps) - 1
-        self.updated_at = datetime.now().isoformat()
-        save_run(self)
+            finally:
+                lock.release()
         return self.to_dict()
+
 
 
 def _summarize_output(output: dict) -> str:
@@ -528,15 +315,15 @@ def _summarize_output(output: dict) -> str:
 
 _runs: Dict[str, PipelineRun] = {}
 RUNS_FILE = Path(__file__).parent / "data" / "pipeline_runs.json"
+_runs_lock = threading.RLock()
 
 
 def save_run(run: PipelineRun):
-    _runs[run.run_id] = run
-    try:
-        data = {k: v.to_dict() for k, v in _runs.items()}
-        RUNS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    except:
-        pass
+    run.updated_at = datetime.now().isoformat()
+    with _runs_lock:
+        _runs[run.run_id] = run
+        media.write(RUNS_FILE, {k: v.to_dict() for k, v in _runs.items()})
+
 
 
 def load_runs():
@@ -545,6 +332,7 @@ def load_runs():
         if RUNS_FILE.exists():
             data = json.loads(RUNS_FILE.read_text(encoding="utf-8"))
             for run_id, d in data.items():
+                if run_id in _runs: continue
                 run = PipelineRun(d.get("project_id", ""))
                 run.run_id = run_id
                 run.status = d.get("status", "idle")
@@ -552,7 +340,12 @@ def load_runs():
                 run.created_at = d.get("created_at", "")
                 run.updated_at = d.get("updated_at", "")
                 run.error = d.get("error", "")
-                run.steps = d.get("steps", [])
+                run.init_steps(d.get("config", {}))
+                run.current_step = d.get("current_step", -1)
+                run.steps = [{**base, **old} for base, old in zip(run.steps, d.get("steps", run.steps))]
+                run.status = d.get("status", "idle")
+                if run.status == "running":
+                    run.status = "error"; run.error = "服务重启中断了任务，请重新执行"
                 _runs[run_id] = run
     except:
         pass
@@ -567,17 +360,12 @@ def get_run(run_id: str) -> Optional[PipelineRun]:
 
 
 def clear_project_runs(project_id: str):
-    """清除指定项目的所有流水线运行记录"""
-    global _runs
-    to_delete = [k for k, v in _runs.items() if v.project_id == project_id]
-    for k in to_delete:
-        del _runs[k]
-    # 直接写文件
-    try:
-        data = {k: v.to_dict() for k, v in _runs.items()}
-        RUNS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    except:
-        pass
+    with _runs_lock:
+        if any(r.status == 'running' for r in get_project_runs(project_id)):
+            raise ValueError('请先停止该项目的任务再清除记录')
+        for key in [k for k, value in _runs.items() if value.project_id == project_id]: del _runs[key]
+        media.write(RUNS_FILE, {k: v.to_dict() for k, v in _runs.items()})
+
 
 
 # 启动时加载历史
