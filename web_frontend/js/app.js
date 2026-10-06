@@ -421,10 +421,19 @@ function clearProjectContent() {
 async function loadProjects() {
   try {
     state.projects = await api("/projects");
-  } catch {
-    state.projects = [];
+  } catch (error) {
+    console.warn("加载项目列表失败:", error);
+    // Keep existing choices during a transient failure; distinguish it from an empty list.
+    if (!state.projects.length) {
+      ["projectSelector", "psSettings"].forEach((id) => {
+        const selector = document.getElementById(id);
+        if (selector) selector.innerHTML = '<option value="">项目加载失败，请重新进入资源管理重试</option>';
+      });
+    }
+    return;
   }
   const sel = document.getElementById("projectSelector");
+  const selectedId = state.currentProject ? state.currentProject.project_id : sel.value;
   sel.innerHTML = '<option value="">— 选择项目 —</option>';
   state.projects.forEach((p) => {
     const opt = document.createElement("option");
@@ -432,6 +441,9 @@ async function loadProjects() {
     opt.textContent = p.project_name + " (" + p.project_id.slice(0, 10) + "…)";
     sel.appendChild(opt);
   });
+  sel.value = selectedId || "";
+  // The resource tab may have rendered before this asynchronous request completed.
+  _syncSettingsSelector();
 }
 
 async function switchProject(id) {
@@ -463,6 +475,7 @@ async function switchProject(id) {
         await loadPipelineRuns();
         await loadCharacters();
         await loadScenes();
+        await loadProps();
   // 如果该项目有正在执行的流水线，显示其当前状态
     const runningRun = state.pipelineRuns.find((r) => r.status === "running");
     if (runningRun) {
@@ -2615,12 +2628,15 @@ const PROP_THREE_VIEW_PROMPT = `生成该道具的三视图拼图，布局要求
         function _syncSettingsSelector() {
           const pss = document.getElementById("psSettings");
           if (!pss) return;
-          try {
-            const projs = state.projects;
-            if (!projs || projs.length === 0) return;
-            pss.innerHTML = '<option value="">— 选择项目 —</option>' + projs.map(p => `<option value="${p.project_id}">${p.project_name}</option>`).join("");
-            if (state.currentProject) pss.value = state.currentProject.project_id;
-          } catch {}
+          const selectedId = state.currentProject ? state.currentProject.project_id : pss.value;
+          pss.innerHTML = '<option value="">— 选择项目 —</option>';
+          state.projects.forEach((project) => {
+            const option = document.createElement("option");
+            option.value = project.project_id;
+            option.textContent = project.project_name;
+            pss.appendChild(option);
+          });
+          pss.value = selectedId || "";
         }
 
         // ========== 场景管理 ==========

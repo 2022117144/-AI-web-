@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=1280">
-<title>万象AI V7.5</title>
+<title>万象AI V9.19</title>
 <style>
 :root{--bg:#1e1e1e;--bg2:#252526;--bg3:#2d2d30;--text:#e0e0e0;--text2:#999;--border:#454545}
 *{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft YaHei","PingFang SC",sans-serif}
 body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
 .app{display:flex;flex-direction:column;height:100vh}
 .title-bar{display:flex;align-items:center;height:30px;background:var(--bg3);padding:0 10px;flex-shrink:0}
-.title-bar .icon{width:20px;height:20px;background:#007acc;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;margin-right:6px}
+.title-bar .icon{width:20px;height:20px;background:var(--accent);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;margin-right:6px}
 .title-bar .title{font-size:12px;color:var(--text)}.title-bar .title span{color:#ff6b6b;margin-left:6px;font-size:11px}
 .title-bar .spacer{flex:1}
 .title-bar .win-btn{width:34px;height:26px;border:none;background:transparent;color:var(--text2);cursor:pointer;font-size:12px}
@@ -18,12 +18,12 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
 .wx-sidebar{width:180px;min-width:180px;background:var(--bg3);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:4px;overflow-y:auto;flex-shrink:0}
 .wx-nav-btn{display:flex;align-items:center;gap:6px;padding:10px 12px;border:none;background:transparent;color:var(--text2);font-size:12px;cursor:pointer;border-radius:6px;width:100%;margin:1px 0;font-weight:bold;flex-shrink:0}
 .wx-nav-btn:hover{background:var(--bg2);color:var(--text)}
-.wx-nav-btn.active{background:rgba(0,122,204,0.15);color:#007acc;border-left:3px solid #007acc}
+.wx-nav-btn.active{background:rgba(0,122,204,0.15);color:var(--active-text);border-left:3px solid #007acc}
 .wx-nav-btn .icon{font-size:13px;width:18px;text-align:center}
 .wx-nav-sep{flex:1;min-height:8px}
 .wx-nav-bottom{border-top:1px solid var(--border);padding-top:4px;margin-top:4px}
 .wx-nav-bottom .wx-nav-btn{font-weight:normal;font-size:12px;padding:8px 12px;border:1px solid transparent;border-radius:6px;justify-content:center}
-.wx-nav-bottom .wx-nav-btn:hover{border-color:#007acc}
+.wx-nav-bottom .wx-nav-btn:hover{border-color:var(--accent)}
 .wx-content{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
 .wx-page{display:none;flex:1;min-height:0}
 .wx-page.active{display:flex;flex-direction:column}
@@ -33,31 +33,34 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
 .tb{display:flex;gap:2px;border-bottom:1px solid var(--border);padding-bottom:6px;flex-shrink:0}
 .tb-btn{padding:5px 14px;border:none;background:transparent;color:var(--text2);cursor:pointer;font-size:12px;border-radius:4px 4px 0 0}
 .tb-btn:hover{color:var(--text)}
-.tb-btn.active{color:#007acc;background:rgba(0,122,204,0.1)}
+.tb-btn.active{color:var(--active-text);background:rgba(0,122,204,0.1)}
 </style>
+
+<link rel="stylesheet" href="/css/studio.css?v=1">
+<script src="/js/studio-theme.js?v=1"></script>
 </head>
 <body>
 <div class="app">
   <div class="title-bar">
-    <div class="icon">🪄</div><div class="title">万象AI V7.5</div>
+    <div class="icon">🪄</div><div class="title">万象AI <small class="version-tag">V9.19</small></div>
     <div class="spacer"></div>
     <button class="win-btn">一</button><button class="win-btn">口</button><button class="win-btn close">✕</button>
   </div>
   <div class="wx-main">
     <div class="wx-sidebar">
-      <button class="wx-nav-btn active" data-wx="novel"><span class="icon">📝</span> 小说创作</button>
-      <button class="wx-nav-btn" data-wx="batch"><span class="icon">🤖</span> 批量挂机</button>
-      <button class="wx-nav-btn" data-wx="tools"><span class="icon">🛠️</span> 创作工具</button>
-      <button class="wx-nav-btn" data-wx="copy"><span class="icon">📝</span> 文案</button>
-      <button class="wx-nav-btn" data-wx="shots"><span class="icon">🎬</span> 分镜</button>
-            <button class="wx-nav-btn" data-wx="storyboard"><span class="icon">📋</span> 分镜表</button>
-            <button class="wx-nav-btn" data-wx="pipeline"><span class="icon">⚙️</span> 流水线</button>
-      <button class="wx-nav-btn" data-wx="aitools"><span class="icon">📦</span> 资源管理</button>
+      <button class="wx-nav-btn active" data-wx="novel"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h7a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H4zM14 7a3 3 0 0 1 3-3h3v15h-3a4 4 0 0 0-3 2"/></svg></span> 小说创作</button>
+      <button class="wx-nav-btn" data-wx="batch"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="6" width="16" height="14" rx="3"/><path d="M12 3v3M8 11h.01M16 11h.01M8 16h8"/></svg></span> 批量挂机</button>
+      <button class="wx-nav-btn" data-wx="tools"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 4 6 6M4 20l12-12M4 4v4M2 6h4M18 16v6M15 19h6"/></svg></span> 创作工具</button>
+      <button class="wx-nav-btn" data-wx="copy"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H5v18h14V8zM14 3v5h5M8 12h8M8 16h6"/></svg></span> 文案</button>
+      <button class="wx-nav-btn" data-wx="shots"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 4l3 5M14 4l3 5m-7 3 5 3-5 3z"/></svg></span> 分镜</button>
+            <button class="wx-nav-btn" data-wx="storyboard"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 9v11M15 9v11"/></svg></span> 分镜表</button>
+            <button class="wx-nav-btn" data-wx="pipeline"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M9 6h9v9M6 9v9h9"/></svg></span> 流水线</button>
+      <button class="wx-nav-btn" data-wx="aitools"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span> 资源管理</button>
       <div class="wx-nav-sep"></div>
       <div class="wx-nav-bottom">
-        <button class="wx-nav-btn" data-wx="settings"><span class="icon">⚙️</span> 设置</button>
-        <button class="wx-nav-btn" data-wx="theme"><span class="icon">🎨</span> 切换主题</button>
-        <button class="wx-nav-btn" data-wx="logs"><span class="icon">📋</span> 运行日志</button>
+        <button class="wx-nav-btn" data-wx="settings"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg></span> 设置</button>
+        <button class="wx-nav-btn" data-wx="theme"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14A8 8 0 0 1 10 4a8 8 0 1 0 10 10Z"/></svg></span> 切换主题</button>
+        <button class="wx-nav-btn" data-wx="logs"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2h6v2M9 9h6M9 13h6M9 17h4"/></svg></span> 运行日志</button>
       </div>
     </div>
     <div class="wx-content">
@@ -74,7 +77,7 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
               <div class="sp active" id="novel-outline">
                 <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
                   <input id="novelTopic" placeholder="输入小说主题或设定..." style="flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px">
-                  <button class="wx-btn" onclick="genOutline()" style="background:#007acc;color:#fff;border-color:#007acc;padding:6px 14px">生成大纲</button>
+                  <button class="wx-btn" onclick="genOutline()" style="background:var(--accent);color:#fff;border-color:var(--accent);padding:6px 14px">生成大纲</button>
                   <button class="wx-btn" onclick="genChapterOutline()" style="padding:6px 14px">生成章纲</button>
                   <button class="wx-btn" onclick="genChapterContent()" style="padding:6px 14px">生成正文</button>
                 </div>
@@ -91,7 +94,7 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
         <div style="padding:12px 16px;flex:1;display:flex;flex-direction:column;min-height:0">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-shrink:0">
             <span style="font-size:14px;color:var(--text);font-weight:600">📂 项目</span>
-            <button class="wx-btn" onclick="newProject()" style="background:#007acc;color:#fff;border:none;padding:5px 12px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">＋ 新建项目</button>
+            <button class="wx-btn" onclick="newProject()" style="background:var(--accent);color:#fff;border:none;padding:5px 12px;border-radius:4px;font-size:12px;cursor:pointer;white-space:nowrap">＋ 新建项目</button>
                         <label class="wx-btn" style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:5px 10px;font-size:12px;margin-left:4px"><input type="checkbox" id="autoName" style="accent-color:#007acc;width:13px;height:13px;cursor:pointer"> 自动命名</label>
                         <label class="wx-btn" style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:5px 10px;font-size:12px;margin-left:4px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()" style="accent-color:#007acc;width:13px;height:13px;cursor:pointer"> 全选</label>
             <button class="wx-btn" onclick="batchDelete()" style="color:#e74c3c;border-color:var(--border);padding:5px 12px;font-size:12px;white-space:nowrap">批量删除</button>
@@ -110,13 +113,13 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
             <button class="wx-btn" onclick="setToolMode('director')" style="background:#e74c3c;border-color:#e74c3c;color:#fff;padding:6px 16px;font-weight:bold">开启导演模式</button>
             <select id="toolScript" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;height:32px"><option>预设指令</option><option>无预设指令</option></select>
             <input id="toolVideoUrl" placeholder="输入网络视频地址,支持国内外各大主流平台" style="flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;height:32px">
-            <button class="wx-btn" onclick="toolAction('downloadVideo')" style="padding:6px 12px;height:32px;background:#007acc;color:#fff;border-color:#007acc">下载网络视频</button>
+            <button class="wx-btn" onclick="toolAction('downloadVideo')" style="padding:6px 12px;height:32px;background:var(--accent);color:#fff;border-color:var(--accent)">下载网络视频</button>
             <button class="wx-btn" onclick="toolAction('openFolder')" style="padding:6px 12px;height:32px">打开辅助文件夹</button>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <input id="toolAudioFile" placeholder="选择需要提取字幕的音频或视频, 最长支持30分钟" style="flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;height:32px">
             <button class="wx-btn" onclick="toolAction('selectAudio')" style="padding:6px 12px;height:32px">选择音频文件</button>
-            <button class="wx-btn" onclick="toolAction('extractSubtitle')" style="padding:6px 12px;height:32px;background:#007acc;color:#fff;border-color:#007acc">提取音频字幕</button>
+            <button class="wx-btn" onclick="toolAction('extractSubtitle')" style="padding:6px 12px;height:32px;background:var(--accent);color:#fff;border-color:var(--accent)">提取音频字幕</button>
           </div>
           <div id="toolOutput" style="flex:1;margin-top:10px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:12px;color:var(--text2);overflow-y:auto;min-height:100px">操作结果将显示在这里</div>
         </div>
@@ -137,10 +140,10 @@ body{background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
                             <div class="sb-main" id="sbMain">
                               <div class="sb-toolbar">
                                 <span class="sb-title"></span>
-                                <button class="wx-btn" onclick="sbAnalyzeScript()" style="background:#007acc;color:#fff;border-color:#007acc;padding:4px 12px">🔍 分析文案生成</button>
-                                                                <button class="wx-btn" onclick="sbBatchGenFrames()" style="background:#007acc;color:#fff;border-color:#007acc;padding:4px 12px">🖼 批量生成所有图片</button>
+                                <button class="wx-btn" onclick="sbAnalyzeScript()" style="background:var(--accent);color:#fff;border-color:var(--accent);padding:4px 12px">🔍 分析文案生成</button>
+                                                                <button class="wx-btn" onclick="sbBatchGenFrames()" style="background:var(--accent);color:#fff;border-color:var(--accent);padding:4px 12px">🖼 批量生成所有图片</button>
                                                                 <button class="wx-btn" onclick="sbCancelBatch()" style="color:#e74c3c;border-color:#e74c3c;padding:4px 12px">⏹ 暂停</button>
-                                                                <button class="wx-btn" onclick="sbBatchGenVideos()" style="background:#007acc;color:#fff;border-color:#007acc;padding:4px 12px">🎬 一键生成视频</button>
+                                                                <button class="wx-btn" onclick="sbBatchGenVideos()" style="background:var(--accent);color:#fff;border-color:var(--accent);padding:4px 12px">🎬 一键生成视频</button>
                                                                 <div style="flex:1"></div>
                                                                 <span class="sb-count" id="sbCount">0 个镜头</span>
                               </div>
@@ -220,6 +223,12 @@ var t=document.getElementById('wx-'+this.dataset.wx);
 if(t)t.classList.add('active');
 if (this.dataset.wx === 'batch') loadProjects();
 if (this.dataset.wx === 'logs') refreshLogs();
+if (this.dataset.wx === 'aitools') {
+  var resourceFrame = document.querySelector('#wx-aitools iframe');
+  if (resourceFrame && resourceFrame.contentWindow && resourceFrame.contentWindow.loadProjects) {
+    resourceFrame.contentWindow.loadProjects();
+  }
+}
 if (this.dataset.wx === 'storyboard') { var pid = localStorage.getItem('wx_selected_project') || ''; sbLoadFromProject(pid); }
 saveCurrentPage();
 })});
@@ -232,27 +241,7 @@ function saveCurrentPage() {
 }
 // 恢复上次页面
 function restoreLastPage() {
-  // 恢复主题
-  var savedTheme = localStorage.getItem('wx_theme');
-  if (savedTheme === 'light') {
-    document.documentElement.style.setProperty('--bg', '#f0ebe3');
-    document.documentElement.style.setProperty('--bg2', '#faf6f0');
-    document.documentElement.style.setProperty('--bg3', '#e8e2d8');
-    document.documentElement.style.setProperty('--text', '#3d3d3d');
-    document.documentElement.style.setProperty('--text2', '#888888');
-    document.documentElement.style.setProperty('--border', '#d5cfc5');
-    // 更新主题卡片样式和状态文字
-    var cards = document.querySelectorAll('.theme-card');
-    if (cards.length > 0) {
-      cards.forEach(function(c){c.style.borderColor='transparent'});
-      cards[1].style.borderColor='#007acc';
-      var labels = document.querySelectorAll('.theme-card div:last-child');
-      if (labels.length >= 2) {
-        labels[0].textContent = '点击切换';
-        labels[1].textContent = '当前使用中';
-      }
-    }
-  }
+  WXTheme.apply(WXTheme.read());
   // 恢复上次页面
   var s = localStorage.getItem('wx_last_page');
   if (s) { var b = document.querySelector('[data-wx="'+s+'"]'); if (b) b.click(); }
@@ -302,47 +291,17 @@ function toolAction(action) {
 
 // ====== 切换主题 ======
 function setTheme(theme) {
-  var cards = document.querySelectorAll('.theme-card');
-  cards.forEach(function(c){c.style.borderColor='transparent'});
   localStorage.setItem('wx_theme', theme);
-  // 更新状态文字
-  var labels = document.querySelectorAll('.theme-card div:last-child');
-  if (labels.length >= 2) {
-    labels[0].textContent = theme === 'dark' ? '当前使用中' : '点击切换';
-    labels[1].textContent = theme === 'light' ? '当前使用中' : '点击切换';
-  }
-  if (theme === 'dark') {
-    cards[0].style.borderColor='#007acc';
-    document.documentElement.style.setProperty('--bg', '#1e1e1e');
-    document.documentElement.style.setProperty('--bg2', '#252526');
-    document.documentElement.style.setProperty('--bg3', '#2d2d30');
-    document.documentElement.style.setProperty('--text', '#e0e0e0');
-    document.documentElement.style.setProperty('--text2', '#999');
-    document.documentElement.style.setProperty('--border', '#454545');
-    document.getElementById('themeStatus').textContent = '已切换到深色主题';
-  } else {
-    cards[1].style.borderColor='#007acc';
-    document.documentElement.style.setProperty('--bg', '#f0ebe3');
-    document.documentElement.style.setProperty('--bg2', '#faf6f0');
-    document.documentElement.style.setProperty('--bg3', '#e8e2d8');
-    document.documentElement.style.setProperty('--text', '#3d3d3d');
-    document.documentElement.style.setProperty('--text2', '#888888');
-    document.documentElement.style.setProperty('--border', '#d5cfc5');
-    document.getElementById('themeStatus').textContent = '已切换到浅色主题';
-  }
-  // 刷新所有 iframe 以继承主题
-  document.querySelectorAll('iframe').forEach(function(f){
-    f.src = f.src.replace(/&v=\d+/, '') + '&v=' + Date.now();
+  WXTheme.apply(theme);
+  document.getElementById('themeStatus').textContent = theme === 'dark' ? '已切换到深色主题' : '已切换到浅色主题';
+  // Same-origin embedded editors inherit the palette without reloading their content.
+  document.querySelectorAll('iframe').forEach(function(frame) {
+    try {
+      if (frame.contentWindow.WXTheme) frame.contentWindow.WXTheme.apply(theme);
+    } catch (_) { /* An unloaded frame reads the saved theme when it opens. */ }
   });
-  applyTheme();
 }
-function applyTheme() {
-  var t = localStorage.getItem('wx_theme') || 'dark';
-  var isDark = t === 'dark';
-  document.body.style.background = isDark ? '#1e1e1e' : '#f5f5f5';
-  var els = document.querySelectorAll('.wx-sidebar, .wx-content, .title-bar, .proj-bar, .run-mini, .cd, .wx-btn');
-  els.forEach(function(el){ /* theme applied via CSS variables */ });
-}
+function applyTheme() { WXTheme.apply(WXTheme.read()); }
 
 // ====== 运行日志 ======
 async function refreshLogs() {
@@ -935,14 +894,14 @@ function sbBatchGenVideos() { _sbCallIframe('batchGenVideos'); }
     <input id="renameInput" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:13px;outline:none" onkeydown="if(event.key==='Enter')doRename()" autofocus>
     <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
       <button class="wx-btn" onclick="closeRename()" style="padding:6px 16px">取消</button>
-      <button class="wx-btn" onclick="doRename()" style="background:#007acc;color:#fff;border-color:#007acc;padding:6px 16px">确认</button>
+      <button class="wx-btn" onclick="doRename()" style="background:var(--accent);color:#fff;border-color:var(--accent);padding:6px 16px">确认</button>
     </div>
   </div>
 </div>
 
 <style>
 .wx-btn{border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text);font-size:12px;cursor:pointer;padding:4px 10px;white-space:nowrap}
-.wx-btn:hover{border-color:#007acc}
+.wx-btn:hover{border-color:var(--accent)}
 .proj-bar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:6px}
 .proj-bar:hover{border-color:var(--border)}
 .proj-name{font-size:13px;font-weight:600;color:var(--text);width:120px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -952,7 +911,7 @@ function sbBatchGenVideos() { _sbCallIframe('batchGenVideos'); }
 .run-mini-status{font-size:10px;width:50px;flex-shrink:0}
 .run-mini-id{font-size:9px;color:var(--text2);width:55px;flex-shrink:0}
 .step-dot{width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:7px;cursor:pointer;transition:all .15s;border:1px solid transparent;flex-shrink:0}
-.step-dot:hover{transform:scale(1.3);border-color:#007acc}
+.step-dot:hover{transform:scale(1.3);border-color:var(--accent)}
 .step-dot.done{background:#2ecc71;color:#fff}
 .step-dot.fail{background:#e74c3c;color:#fff}
 .step-dot.skip{background:var(--bg3);color:var(--text2);border-color:var(--border)}
@@ -961,7 +920,7 @@ function sbBatchGenVideos() { _sbCallIframe('batchGenVideos'); }
 .proj-select-bar{display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0}
 .proj-select-bar .ps-label{font-size:12px;color:var(--text2);font-weight:600;white-space:nowrap}
 .proj-select-bar .ps-select{flex:1;max-width:300px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:12px;cursor:pointer}
-.proj-select-bar .ps-select:hover{border-color:#007acc}
+.proj-select-bar .ps-select:hover{border-color:var(--accent)}
 .proj-select-bar .ps-select option{background:var(--bg);color:var(--text)}
 /* ====== 分镜表 ====== */
 .sb-main{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
@@ -985,7 +944,7 @@ function sbBatchGenVideos() { _sbCallIframe('batchGenVideos'); }
 .sb-idx-down{margin-top:1px}
 .sb-idx-del{margin:1px 0}
 .sb-icon-btn.sb-down{width:18px;height:18px;border:1px solid var(--border);border-radius:2px;background:var(--bg2);color:var(--text2);font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center}
-.sb-icon-btn.sb-down:hover{border-color:#007acc;color:var(--text)}
+.sb-icon-btn.sb-down:hover{border-color:var(--accent);color:var(--text)}
 .sb-icon-btn.sb-del{width:16px;height:16px;border:1px solid transparent;border-radius:2px;background:transparent;color:var(--text2);font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1}
 .sb-icon-btn.sb-del:hover{border-color:#e74c3c;color:#e74c3c}
 .sb-gen-status{font-size:10px;margin-right:2px;display:inline-block}
@@ -996,28 +955,28 @@ function sbBatchGenVideos() { _sbCallIframe('batchGenVideos'); }
 .sb-script-text:empty:before{content:attr(placeholder);color:var(--text2);opacity:0.4}
 .sb-script-prompt:empty:before{content:attr(placeholder);color:var(--text2);opacity:0.4}
 .sb-script-text{font-size:11px;color:var(--text);line-height:1.4;padding:2px 4px;border:1px solid transparent;border-radius:2px;outline:none;min-height:18px;cursor:text}
-.sb-script-text:focus{border-color:#007acc;background:var(--bg2)}
+.sb-script-text:focus{border-color:var(--accent);background:var(--bg2)}
 .sb-script-prompt{font-size:10px;color:var(--text2);line-height:1.4;padding:2px 4px;border:1px solid transparent;border-radius:2px;outline:none;min-height:16px;cursor:text;margin-top:1px}
 .sb-script-prompt:focus{border-color:#555;background:var(--bg2)}
 .sb-script-prompt:empty:before{content:attr(placeholder);color:var(--text2);opacity:0.5}
 .sb-asset-box{width:48px;height:48px;border:1px dashed var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;margin:0 auto;overflow:hidden;background:var(--bg2)}
-.sb-asset-box:hover{border-color:#007acc}
+.sb-asset-box:hover{border-color:var(--accent)}
 .sb-asset-add{font-size:20px;color:var(--text2);line-height:1}
 .sb-asset-img{width:100%;height:100%;object-fit:cover}
 .sb-asset-name{font-size:11px;color:var(--text);cursor:pointer;text-align:center;padding:4px 0;line-height:1.3}
-.sb-asset-name:hover{color:#007acc}
+.sb-asset-name:hover{color:var(--active-text)}
 .sb-asset-text{display:inline-block;text-align:center;padding:1px 8px;border:1px solid var(--border);border-radius:3px;background:var(--bg2);line-height:1.6;font-size:11px;color:var(--text)}
 .sb-asset-placeholder{color:var(--text2);font-size:11px;cursor:pointer;display:inline-block;padding:1px 8px;border:1px solid var(--border);border-radius:3px;background:var(--bg2);line-height:1.6}
-.sb-asset-placeholder:hover{color:#007acc;border-color:#007acc}
+.sb-asset-placeholder:hover{color:var(--active-text);border-color:var(--accent)}
 .sb-btn{width:100%;padding:3px 0;border:1px solid var(--border);border-radius:3px;background:var(--bg2);color:var(--text);font-size:10px;cursor:pointer;white-space:nowrap}
-.sb-btn:hover{border-color:#007acc;color:#007acc}
+.sb-btn:hover{border-color:var(--accent);color:var(--active-text)}
 .sb-btn-video,.sb-btn-gen{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px 0 4px!important;gap:3px;line-height:1.1;height:100%;min-height:60px}
 .sb-btn-video .sb-video-icon{font-size:22px;display:block;margin-bottom:1px}
 .sb-btn-video span:last-child{font-size:10px;color:var(--text2);white-space:nowrap}
-.sb-btn-video:hover span:last-child{color:#007acc}
+.sb-btn-video:hover span:last-child{color:var(--active-text)}
 
 .sb-icon-btn{width:24px;height:24px;border:1px solid var(--border);border-radius:3px;background:var(--bg2);color:var(--text2);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center}
-.sb-icon-btn:hover{border-color:#007acc;color:var(--text)}
+.sb-icon-btn:hover{border-color:var(--accent);color:var(--text)}
 .sb-icon-btn.sb-del:hover{border-color:#e74c3c;color:#e74c3c}
 .sb-gen-status{font-size:10px;margin-right:2px;display:inline-block}
 .sb-gen-status.loading{animation:sbPulse 1s infinite}
@@ -1032,7 +991,7 @@ function sbBatchGenVideos() { _sbCallIframe('batchGenVideos'); }
 .sb-frame-cell{display:flex;gap:4px;height:100%;min-height:0;align-items:stretch}
 .sb-frame-btns{display:flex;flex-direction:column;gap:0;width:18px;min-width:18px;max-width:18px;flex-shrink:0;flex:1}
 .sb-btn-sm{width:100%;flex:1;padding:0;border:1px solid var(--border);border-radius:2px;background:var(--bg2);color:var(--text);font-size:8px;cursor:pointer;white-space:nowrap;line-height:1.2;display:flex;align-items:center;justify-content:center}
-.sb-btn-sm:hover{border-color:#007acc}
+.sb-btn-sm:hover{border-color:var(--accent)}
 .sb-frame-preview{flex:1;min-width:0;display:flex;align-items:center;justify-content:center}
 .sb-frame-img{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .sb-frame-img img{max-width:100%;max-height:100%;object-fit:contain}

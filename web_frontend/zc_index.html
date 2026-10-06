@@ -25,27 +25,7 @@ body{background:var(--bg)}
 .frame-box .frame-placeholder{flex:1!important}
 </style>
 <script>
-// 继承主窗口主题
 (function(){
-  var t = localStorage.getItem('wx_theme') || 'dark';
-  var root = document.documentElement;
-  if (t === 'light') {
-    root.style.setProperty('--bg-body', '#f0ebe3');
-    root.style.setProperty('--bg-panel', '#faf6f0');
-    root.style.setProperty('--bg-card', '#e8e2d8');
-    root.style.setProperty('--bg-hover', '#ddd8ce');
-    root.style.setProperty('--border', '#d5cfc5');
-    root.style.setProperty('--border-light', '#d5cfc5');
-    root.style.setProperty('--text', '#3d3d3d');
-    root.style.setProperty('--text-secondary', '#888');
-    root.style.setProperty('--text-muted', '#999');
-  }
-  // 选中项颜色：浅色模式用加深的颜色，不是黑色
-  if (t === 'light') {
-    var style = document.createElement('style');
-    style.textContent = '.shot-card.selected{background:#d4cfc5!important}.shot-card:hover{background:#ddd8ce!important}.tab.active{color:#007acc!important}.btn-primary{background:#007acc!important}';
-    document.head.appendChild(style);
-  }
   // 立即根据 URL 参数切换 tab（避免闪烁）
   var urlTab = new URLSearchParams(location.search).get('tab');
   if (urlTab && ['script','shots','voiceover','pipeline','aitools','settings'].includes(urlTab)) {
@@ -54,6 +34,9 @@ body{background:var(--bg)}
   }
   })();
   </script>
+
+<link rel="stylesheet" href="/css/studio.css?v=1">
+<script src="/js/studio-theme.js?v=1"></script>
 </head>
 <body>
 
@@ -417,7 +400,7 @@ body{background:var(--bg)}
   </div>
 </div>
 
-<script src="js/app.js?v=7"></script>
+<script src="js/app.js?v=8"></script>
 <script>
 // 视觉风格预设
 var visualStyles = [];
